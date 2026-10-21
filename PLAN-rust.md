@@ -36,7 +36,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 
 | Subsystem | RE from binary | Build to spec (crate) | Doc |
 |-----------|----------------|-----------------------|-----|
-| **Web server / HTTPS** | which endpoints/pages, the JSON API shape (`json/*`), TLS cert/key store (PKCS12/PEM, `CERT_STORE`), HTTPS port/config | HTTP/1.1 + TLS = `hyper`/`picoserve`-style + `rustls`; serve a minimal status+control UI | docs/33 (todo) |
+| ~~**Web server / HTTPS**~~ ☑ | RomPager+Allegro SSL; **58 `json/*` endpoints**; dispatch_json; cert/CSR store | HTTP + `rustls` + minimal SPA | **docs/33 done** |
 | **SSH / CLI** | the CLI command set (iLO "oemhp"/SMASH-CLP commands), auth model | SSH = `russh` (RFC 4251+); reimplement the command grammar | docs/34 (todo) |
 | **SNMP** | which MIBs/OIDs + traps iLO exposes (CPQ/compaq enterprise OIDs, health traps) | SNMP v1/v2c/v3 = a Rust SNMP agent; map the CPQHLTH/CPQSINFO OIDs to our sensor data | docs/35 (todo) |
 | **IPMI** | the KCS/CHIF transport (have it), the OEM commands HP adds | IPMI 2.0 = build the command handlers; reuse `docs/05` KCS + `docs/28` CHIF | docs/36 (todo) |
@@ -66,8 +66,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 
 Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 
-1. **Web server / HTTPS** (docs/33) — the main management surface; ties to the crypto/cert store
-   already mapped. RE the `json/*` API + endpoints + cert storage.
+1. ~~Web server / HTTPS~~ ☑ **docs/33** — RomPager+Allegro SSL, 58 json/* endpoints, cert/CSR.
 2. **IPMI OEM commands** (docs/36) — transport already mapped (KCS/CHIF); RE the HP OEM command set.
 3. **SSH CLI command grammar** (docs/34) — the iLO CLI verbs.
 4. **SNMP MIBs/OIDs + traps** (docs/35) — map CPQ OIDs to sensor data.
