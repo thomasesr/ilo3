@@ -8,7 +8,7 @@ Date: 2026-10-20. Method: static RE of the boot ROM (`decompiled/bootrom_7f0000.
 
 | Region       | Role                                   | Confidence |
 |--------------|----------------------------------------|------------|
-| `0xC0000000` | Gromit-XE primary register block (sys-ctrl, crypto, RTC, UART) | **confirmed** |
+| `0xC0000000` | Gromit-XE primary register block (sys-ctrl, RTC, UART (NO crypto engine — docs/32)) | **confirmed** |
 | `0xCEFF0000` | **interrupt controller IC0** (IC1 at `0x80F00000`) — 64 IRQs, see docs/12 | confirmed |
 | `~0xFA000000`| free-running timer/counter (`0xF9FFFFFC` read for elapsed time) | **confirmed** (role inferred) |
 | OS driver bases (below) | I2C / GPIO / MAC / SPI etc. | candidates only |
@@ -20,7 +20,7 @@ Verified from boot-ROM disassembly:
 | Offset | Access | Function | Evidence |
 |--------|--------|----------|----------|
 | `+0x00`–`0x08` | ldr/str | system control (reset/config) | early init |
-| `+0x0C` | ldr/str | **crypto engine** ctrl/status | only touched by the decrypt/hash/signature path (`Starting decrypt`→`Signature valid`); matches `Corsec_asic` |
+| `+0x0C` | — | ~~crypto engine~~ **NOT a crypto reg** (docs/32): `0xC000000C` has 0 refs/accesses. iLO 3 crypto is ALL SOFTWARE (klite lib + Allegro SSL); no HW engine. |
 | `+0x20,0x24,0x44,0x4C,0x64` | ldr/str | system / DDR / clock config | boot-time init |
 | `+0x97` | strb | timer **latch/ack** byte (NOT RTC) — see **`docs/18`** | written 0 by tick-handler teardown |
 | `+0x98` | ldrd | **64-bit timer counter** (timebase; the "time field") — docs/12 | kernel get-time `0x3468` |
