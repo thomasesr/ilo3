@@ -80,7 +80,7 @@ max` / `Force to min` / `Force to ZERO`, per-PWM lock.
 
 - The exact **per-sensor demand curve** (temp→% mapping) and the SDR **threshold values** (caution/
   critical per sensor) — board/SDR data; read from a live iLO SDR dump or a datasheet.
-- The sensor→PWM **grouping table + weightings** for the specific board (DL360 G7 etc.).
+- The sensor→PWM **grouping table + weightings** for the specific board (DL380p Gen7 etc.).
 - The **BLOWOUT** duration + trigger thresholds; the ramp (PCT) step semantics.
 - **Hardware validation**: run the rewritten controller under thermal load and confirm fans track
   temp + the fail-safe forces max. Do NOT ship fan control unvalidated.

@@ -131,5 +131,5 @@ The **core is fully mapped** — all hardware (register-exact, docs/02-32), ever
 (contract-level, docs/33-43), and the iLO↔BIOS interface (docs/44). **That is enough to build the
 rewrite.** Remaining gaps are small/scoped: **FUM** self-update (26 hits); **remote-console** wire
 protocols (IRC/vMedia/VSP — only if KVM is in scope, heavy on ARMv5, likely deferred); **blade/OA**
-(309 — out of scope for a DL360 **G7 rack** server); **AHS** format (skip); Kerberos impl (standard).
+(309 — out of scope for a DL380p **Gen7 rack** server); **AHS** format (skip); Kerberos impl (standard).
 RE these just-in-time per feature.

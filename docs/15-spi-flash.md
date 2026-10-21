@@ -49,7 +49,7 @@ write opcode `0x05` → `+0x03`, start (`+0x02 = 1`), wait, read `+0x3E` bit0 = 
 
 The iLO boot flash is a **25-series SPI NOR**. The firmware **auto-detects the chip by JEDEC ID**
 (RDID `0x9F`), so **HP multi-sourced it — there is no single part number**; the actual chip on a
-given DL360 G7 board depends on the manufacturing batch. Supported manufacturers, from the kernel
+given DL380p Gen7 board depends on the manufacturing batch. Supported manufacturers, from the kernel
 `gxekflsh` JEDEC-ID detect table:
 
 | JEDEC mfr ID | Vendor |

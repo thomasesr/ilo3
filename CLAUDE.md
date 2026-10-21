@@ -37,6 +37,10 @@ independently of the host OS and CPU, powered by standby power, giving remote ma
 even when the server is off.
 
 - **iLO 3** shipped on HP ProLiant **Gen7 (G7)** servers (~2010–2012 era).
+- **Target hardware (this project): HP ProLiant DL380p Gen7** (2U, 2-socket rack). Same iLO 3 /
+  Gromit-XE firmware as all G7 (RE is model-agnostic); the DL380 2U form factor differs from the
+  1U DL360 only in physical topology (more drive bays / 6 fans / up to 2 PSUs) — which lives in the
+  board SDR data, not the firmware. All RE herein applies; only per-board SDR specifics vary.
 - Provides: remote console (virtual KVM), virtual media, power control, hardware health
   monitoring, IPMI, SNMP, web UI (HTTPS), SSH/CLI, and the XML scripting interface (RIBCL).
 - SoC: typically an **ARM**-based management processor. iLO 3 commonly uses a GLM/SoC with
@@ -50,61 +54,6 @@ iLO 3 is end-of-life. No new firmware, no security patches. Modern browsers/TLS 
 reject its old crypto; management features break. Recovering source enables patching these
 issues on hardware still in service.
 
-## Background: What OpenBMC Is
-
-**OpenBMC** is a Linux Foundation project building an open-source firmware stack for BMCs —
-the direct replacement target for iLO 3 on this hardware. It is the "port to" side of this
-project; iLO 3 analysis is the "port from" side.
-
-Stack shape:
-- **Yocto/OpenEmbedded build system.** The repo is a set of BitBake layers (`meta-*`), not a
-  monolithic source tree. A build produces a flashable image (U-Boot + Linux kernel + rootfs).
-- **Linux kernel** on the BMC SoC (ARM, typically ASPEED AST2400/2500/2600 or Nuvoton NPCM;
-  HPE's own SoC family is **GXP**). Board support = a devicetree + machine `.conf`.
-- **D-Bus as the system bus.** Every service (sensors, power, inventory, LEDs) publishes and
-  consumes typed D-Bus interfaces defined by **phosphor-dbus-interfaces**. This is the
-  integration contract — porting a feature means exposing it on the right D-Bus interface.
-- **phosphor-\*** userspace daemons implement the BMC functions: `phosphor-hwmon` /
-  `dbus-sensors` (sensors), `x86-power-control` (power sequencing), `phosphor-state-manager`
-  (host/chassis/BMC state), `phosphor-fan-presence` / `phosphor-pid-control` (fans),
-  `phosphor-ipmi-host` + `phosphor-ipmi-kcs` (IPMI), `phosphor-logging` (event log).
-- **bmcweb** — HTTPS server exposing a **Redfish** API (the modern replacement for iLO's RIBCL
-  XML interface) plus KVM/virtual-media endpoints. Modern TLS, actively maintained — this is
-  what fixes the "browsers reject iLO 3 crypto" problem.
-- **entity-manager** — runtime hardware description from JSON config, replacing hardcoded
-  board tables.
-
-### Why OpenBMC for iLO 3
-
-iLO 3 is EOL with no patches. OpenBMC is maintained, has current TLS/crypto, and already
-carries an HPE layer. The port is: identify what in iLO 3 is *hardware* (SoC registers, clock
-and pinmux, LPC/eSPI to host, PECI, I2C/SMBus sensor topology, power sequencing GPIOs, flash
-layout) versus what is *HP application software* (web UI, licensing, RIBCL) — then re-express
-the hardware half as a devicetree + machine layer and let OpenBMC supply the software half.
-
-### Upstream HPE support already in-tree (`openbmc/meta-hpe/`)
-
-Relevant prior art — HPE already upstreams a BMC SoC layer:
-
-- `meta-gxp/` — BSP for the **HPE GXP** SoC. `conf/machine/include/gxp.inc` declares:
-  `UBOOT_ARCH = arm`, `SOC_FAMILY = gxp-b1`, `DEFAULTTUNE = armv6-novfp`
-  (`arch-armv6.inc`), `UBOOT_ENTRYPOINT = UBOOT_LOADADDRESS = 0x40100000`.
-  U-Boot fork: `github.com/HewlettPackard/gxp-uboot`, branch `v2020.10-gxp-openbmc`.
-  Mainline Linux carries GXP support under `arch/arm/mach-hpe/` + `gxp.dtsi`.
-- `meta-common/` — shared HPE recipes (`recipes-hpe/host`, `vehci`, IPMI, packagegroups).
-- Machine layers: `meta-dl360-g11`, `meta-dl385-g11`, `meta-rl300-g11`, `meta-dl360poc`
-  (Gen11 servers). Each machine `.conf` is tiny — `KERNEL_DEVICETREE = gxp.dtb` plus three
-  `require` lines. **`meta-dl360poc` is the best template** for a new HPE machine port.
-- `conf/machine/include/hpe.inc` sets the service wiring: `x86-power-control` for host and
-  chassis state, `phosphor-ipmi-kcs` for host IPMI, `packagegroup-hpe-apps` for
-  chassis/fan/flash/system management.
-
-**SoC resolved (`docs/02-soc-id.md`):** iLO 3's ASIC is HP's **Gromit-XE (`GXE`)** —
-distinct silicon from GXP (iLO 4/5 era). So `meta-gxp` is a **structural template only**, not
-reusable SoC support: a port needs a new `meta-ilo3` layer + from-scratch Gromit-XE devicetree
-(mainline Linux has no Gromit-XE support). CPU core = **ARM926EJ-S / ARMv5TEJ** → OpenBMC tune
-**armv5te** (older than meta-gxp's armv6). Ghidra: `ARM:LE:32:v5`.
-
 ## Status / Progress
 
 - **Env**: Ubuntu 24.04 container, apt + passwordless sudo. Installed: Ghidra 12.1.4 (`/opt/ghidra`,
@@ -113,8 +62,9 @@ reusable SoC support: a port needs a new `meta-ilo3` layer + from-scratch Gromit
 - **Firmware acquired** (`firmware/`, SHA256 verified): iLO 3 FW **1.94** as `.rpm` and `.scexe`.
 - **RPM unpacked** → flash image `ilo3_194.bin` (8.4 MB) staged at `firmware/staging/ilo3_194.bin`.
   Format identified, header + section table partly decoded, entropy-mapped. See `docs/01-rpm-unpack.md`.
-- **OpenBMC cloned** → `openbmc/` (shallow, commit `0d89cc3`, 2026-10-20, ~95 MB). `meta-hpe`
-  present with `meta-gxp` BSP (ARMv6/`gxp-b1`) + Gen11 machine layers.
+- **OpenBMC evaluated, then removed** (2026-10-21): the shallow `openbmc/` clone (commit
+  `0d89cc3`, meta-hpe/meta-gxp ARMv6) is deleted — OpenBMC doesn't fit the HW (see Project
+  Objective). Re-clone `github.com/openbmc/openbmc --depth 1` only if a reference lookup needs it.
 - **Payload = compressed, not encrypted** (HP LZSS, 0x1000 window; `tools/ilo_lzss.py`).
 - **SoC identified: HP "Gromit-XE" (`GXE`) ASIC**, Green Hills INTEGRITY RTOS. See `docs/02-soc-id.md`.
 - **CPU core: ARM926EJ-S (ARMv5TEJ)** → Ghidra `ARM:LE:32:v5`. GXE variant PN **438893-503**.
@@ -355,27 +305,16 @@ decompiled/        # decompiler output (Ghidra/IDA exports)  [create as needed]
 docs/              # findings, memory map, binary format notes
 tools/             # unpack/patch/repack scripts  [create as needed]
 rebuild/           # modified sources + build/flash artifacts
-  meta-ilo3/       # OpenBMC layer draft: ilo3-gxe.dts devicetree + machine conf (from docs/02-15)
+  meta-ilo3/       # HW-RE reference: ilo3-gxe.dts + 9 Linux drivers (register maps/driver logic;
+                   # ports to the Rust HAL — OpenBMC build path shelved, see Project Objective)
 research/          # notes, datasheets, upstream references
-openbmc/           # upstream OpenBMC clone (read-only reference) — NOT our code
-  meta-hpe/        # HPE layer: meta-gxp BSP + Gen11 machine layers (port template)
-  meta-phosphor/   # core OpenBMC distro policy + phosphor service recipes
-  meta-aspeed/     # ASPEED BSP — useful as a second, more complete SoC-port example
 ```
-
-`openbmc/` is a shallow (`--depth 1`) clone of `github.com/openbmc/openbmc`, no submodules.
-Treat it as **upstream reference, read-only** — do not commit changes into it. Port work for
-iLO 3 belongs in a separate layer under `rebuild/` (e.g. `rebuild/meta-ilo3/`) that layers on
-top, not in edits to the clone. Refresh with `git -C openbmc pull --depth 1`; re-clone deeper
-(`--depth 50` or full) if history/blame is needed.
 
 ## Tooling (expected)
 
 - **Ghidra** / **IDA Pro** / **radare2 / rizin** — disassembly and decompilation.
 - **binwalk** — identify and extract embedded filesystems/compressed blobs from images.
 - **arm-none-eabi** or similar cross toolchain — if rebuilding.
-- **BitBake / Yocto** (`openbmc/setup`, `oe-init-build-env`) — building OpenBMC images.
-  Needs a Yocto-capable host (build deps + ~50 GB disk per machine target).
 - **devicetree compiler (`dtc`)** — reading/writing the board description for a port.
 - **`tools/ilo_lzss.py`** — HP iLO LZSS decompressor + ImgHeader parser (`--verify` self-checks).
 - Keep a record in `docs/` of which tool and version produced each artifact.
