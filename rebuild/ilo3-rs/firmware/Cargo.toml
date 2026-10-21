@@ -11,3 +11,6 @@ test = false
 bench = false
 
 [dependencies]
+# Single-core critical section via CPSR IRQ masking (ARMv5 has no LDREX, so
+# core::sync::atomic + embassy-sync route through this). Impl in src/critsec.rs.
+critical-section = { version = "1.2", features = ["restore-state-bool"] }

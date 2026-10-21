@@ -8,14 +8,26 @@ firmware — see `../../PLAN-rust.md` (roadmap), `../../docs` (RE spec),
 ## Status: Phase 1 — bring-up skeleton
 
 - ✅ Builds + links for `armv5te-none-eabi` → correct ARM32 LE ELF, entry `0x20000000`.
-- ✅ Reset/startup: SVC + IRQ/FIQ masked → CP15 (MMU + caches off) → SVC stack →
-  zero `.bss` → `rust_main`. (`src/main.rs` `global_asm!`.)
+- ✅ Reset/startup: SVC + IRQ/FIQ masked → CP15 (MMU + caches off) → IRQ + SVC
+  stacks → zero `.bss` → `rust_main`. (`src/main.rs` `global_asm!`.)
 - ✅ Polled console UART driver (`src/uart.rs`, Gromit-XE 8-bit @ `0xC00000F0`, docs/05).
+- ✅ `critical-section` impl (`src/critsec.rs`) — CPSR IRQ-mask, single core (no
+  LDREX on ARMv5 → `core::sync::atomic`/embassy-sync route through it).
+- ✅ 2-bank irqchip HAL (`src/intc.rs`, docs/12) — 64 IRQs, ENABLE/DISABLE/PENDING/EOI;
+  `init()` masks+clears (exercised).
+- ✅ 64-bit monotonic timer + `delay_us` (`src/timer.rs`, `0xC0000098`, docs/12);
+  Wallace clockevent (`0xD1000000`, IRQ36) register-exact, wired once IRQs are live.
+- ✅ ARM exception vectors + root IRQ dispatch (`src/vectors.rs`) — 8-entry table,
+  `_irq_entry` → `irq_dispatch` → per-line handlers; disasm-verified.
+- ⏳ **IRQ delivery gated on the MMU sub-phase**: ARM926 has no VBAR, so the vector
+  base is `0x0`/`0xFFFF0000`, neither our DDR — Phase 1 drives time off the polled
+  counter; the IRQ path is ready and unmasks once the MMU maps RAM at the base.
 - ⏳ **Not yet hardware-validated** — needs a board (or a custom QEMU machine). The
   stock `qemu-system-arm -M versatilepb` is ARM926 but has a different UART/RAM map.
 
-Next (Phase 1 cont.): embassy executor + timer (`0xC0000098`) + irqchip
-(2-bank, `0xCEFF0000`/`0x80F00000`) + `critical-section` impl (no LDREX on ARMv5).
+Next (Phase 1 cont.): embassy executor (custom ARMv5 `Pender` + `embassy-time-driver`
+over `src/timer.rs`) → SPL (DDR init `docs/30` + SPI-NOR load) → MMU bring-up (unblocks
+IRQ delivery) → hardware validation.
 
 ## Layout
 
@@ -26,8 +38,12 @@ rust-toolchain.toml     pin nightly + rust-src (tier-3 target → build-std)
 firmware/               the firmware binary crate
   link.x                memory map (DDR 0x20000000, 16M; docs/13)
   build.rs              puts link.x on the linker search path
-  src/main.rs           reset/startup + rust_main + panic
+  src/main.rs           reset/startup (IRQ+SVC stacks) + rust_main + panic
   src/uart.rs           polled console UART HAL
+  src/critsec.rs        critical-section impl (CPSR IRQ mask, ARMv5)
+  src/intc.rs           2-bank irqchip HAL (64 IRQs; docs/12)
+  src/timer.rs          64-bit monotonic counter + Wallace clockevent (docs/12)
+  src/vectors.rs        ARM exception vectors + root IRQ dispatch
 ```
 
 ## Build

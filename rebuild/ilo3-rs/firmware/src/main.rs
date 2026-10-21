@@ -12,7 +12,11 @@ use core::arch::global_asm;
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;
 
+mod critsec; // critical-section impl (CPSR IRQ mask) — registered via set_impl!
+mod intc; // 2-bank Gromit-XE irqchip
+mod timer; // 64-bit monotonic counter + Wallace clockevent
 mod uart;
+mod vectors; // ARM exception vectors + IRQ dispatch
 use uart::Uart;
 
 // ---- reset / startup (runs at 0x20000000, the image entry) ----
@@ -30,7 +34,11 @@ global_asm!(
     "    mov  r0, #0",
     "    mcr  p15, 0, r0, c7, c7, 0",  // invalidate I+D caches
     "    mcr  p15, 0, r0, c8, c7, 0",  // invalidate TLB
-    "    ldr  sp, =_stack_top",        // SVC stack = top of RAM
+    // set up the IRQ-mode banked stack, then return to SVC for the SVC stack
+    "    msr  cpsr_c, #0xD2",          // IRQ mode, IRQ+FIQ masked
+    "    ldr  sp, =_irq_stack_top",    // IRQ-mode sp (top 4 KB)
+    "    msr  cpsr_c, #0xD3",          // back to SVC mode, IRQ+FIQ masked
+    "    ldr  sp, =_svc_stack_top",    // SVC stack (below the IRQ stack)
     // zero .bss
     "    ldr  r0, =_sbss",
     "    ldr  r1, =_ebss",
@@ -57,10 +65,35 @@ pub extern "C" fn rust_main() -> ! {
     let mut con = Uart::console();
     let _ = writeln!(con, "\n[ilo3-rs] Gromit-XE bring-up — hello from Rust on ARM926EJ-S");
     let _ = writeln!(con, "[ilo3-rs] UART @ 0xC00000F0, RAM @ 0x20000000");
-    let _ = writeln!(con, "[ilo3-rs] phase 1: polled console up. halting.");
-    loop {
-        wfi();
+
+    // irqchip: mask all lines and clear pending (exercises critical-section).
+    intc::init();
+    let _ = writeln!(con, "[ilo3-rs] intc: 2 banks / 64 IRQs masked + cleared");
+
+    // Interrupt delivery (vector install + IRQ unmask + Wallace tick) waits on
+    // the MMU/SPL sub-phase — the CPU exception base (0x0 / 0xFFFF0000) isn't
+    // our DDR until the MMU can map writable RAM there (see vectors.rs). The
+    // vector table, IRQ dispatch and Wallace clockevent are register-exact and
+    // ready; Phase 1 drives time off the polled monotonic counter instead.
+    let _ = writeln!(
+        con,
+        "[ilo3-rs] timer: 64-bit monotonic counter @ 0xC0000098, {} Hz (placeholder)",
+        timer::TIMER_HZ
+    );
+
+    let t0 = timer::now_ticks();
+    for tick in 0u32.. {
+        timer::delay_us(1_000_000);
+        let now = timer::now_ticks();
+        let _ = writeln!(
+            con,
+            "[ilo3-rs] tick {} — monotonic={} (+{} ticks)",
+            tick,
+            now,
+            now.wrapping_sub(t0)
+        );
     }
+    unreachable!()
 }
 
 #[panic_handler]

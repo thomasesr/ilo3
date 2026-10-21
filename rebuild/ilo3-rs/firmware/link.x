@@ -16,9 +16,12 @@ MEMORY
   RAM (rwx) : ORIGIN = 0x20000000, LENGTH = 16M
 }
 
-/* Top-of-RAM downward-growing SVC stack. 64 KB for bring-up. */
+/* Top-of-RAM downward-growing stacks. 64 KB reserved for bring-up: the IRQ
+ * mode gets the top 4 KB, SVC mode the rest. Both set in _start (src/main.rs). */
 _stack_top = ORIGIN(RAM) + LENGTH(RAM);
 _stack_size = 0x10000;
+_irq_stack_top = _stack_top;              /* IRQ-mode banked sp */
+_svc_stack_top = _stack_top - 0x1000;     /* SVC-mode sp (below the IRQ stack) */
 
 SECTIONS
 {
@@ -27,6 +30,7 @@ SECTIONS
   .text : ALIGN(4)
   {
     KEEP(*(.text._start));   /* reset entry first, at 0x20000000 */
+    KEEP(*(.text.vectors));  /* exception vector table + IRQ entry (vectors.rs) */
     *(.text .text.*);
   } > RAM
 
