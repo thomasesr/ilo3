@@ -38,7 +38,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 |-----------|----------------|-----------------------|-----|
 | ~~**Web server / HTTPS**~~ ☑ | RomPager+Allegro SSL; **58 `json/*` endpoints**; dispatch_json; cert/CSR store | HTTP + `rustls` + minimal SPA | **docs/33 done** |
 | ~~**SSH / CLI**~~ ☑ | RomSShell 4.62; SMASH CLP + HP verbs (power/vm/vsp/textcons); /map1 + /system1 tree | `russh` (modern only) + SMASH CLP engine | **docs/34 done** |
-| **SNMP** | which MIBs/OIDs + traps iLO exposes (CPQ/compaq enterprise OIDs, health traps) | SNMP v1/v2c/v3 = a Rust SNMP agent; map the CPQHLTH/CPQSINFO OIDs to our sensor data | docs/35 (todo) |
+| ~~**SNMP**~~ ☑ | v1/v2c (no v3); CPQ MIBs (CPQRIB3/CPQCIDRV/cpqHlth); power/host/health traps ×3 dest; +email(SMTP) | Rust agent (+add v3); public CPQ MIBs → our data | **docs/35 done** |
 | ~~**IPMI**~~ ☑ | IPMI 2.0 + DCMI 1.5 + HP OEM (OEMHP_POWER/RC/VM); KCS/LAN/CHIF | IPMI responder to spec | **docs/36 done** |
 | **RIBCL / XML scripting** | **HP-proprietary** — the RIBCL command/response XML schema | reimplement the parser/handlers clean from the observed schema | docs/37 (todo) |
 | **Redfish** | n/a (iLO 3 predates Redfish) | optional: a minimal Redfish subset = modern alt to RIBCL | — |
@@ -69,7 +69,7 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 1. ~~Web server / HTTPS~~ ☑ **docs/33** — RomPager+Allegro SSL, 58 json/* endpoints, cert/CSR.
 2. **IPMI OEM commands** (docs/36) — transport already mapped (KCS/CHIF); RE the HP OEM command set.
 3. ~~SSH CLI~~ ☑ **docs/34** — RomSShell; SMASH CLP + HP verbs; /map1 + /system1 tree.
-4. **SNMP MIBs/OIDs + traps** (docs/35) — map CPQ OIDs to sensor data.
+4. ~~SNMP~~ ☑ **docs/35** — v1/v2c, CPQ MIBs, power/host/health traps + email alerts.
 5. **NVRAM/config + user DB** (docs/40/38) — settings + auth storage layout.
 6. **RIBCL XML schema** (docs/37) — proprietary; RE the command/response grammar.
 7. **IML/event log format** (docs/39).
