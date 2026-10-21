@@ -56,6 +56,12 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 
 1. **Bring-up** — `no_std` Rust boots from flash: DDR/clock (`docs/30`), UART console, timer,
    irqchip. Port the 4 core drivers (UART/timer/irqchip + GPIO) to Rust HAL.
+   - ⏳ **IN PROGRESS** — workspace scaffolded at `rebuild/ilo3-rs/` (see its README).
+     ☑ builds/links for `armv5te-none-eabi` (entry `0x20000000`, flat .bin ~7 KB);
+     ☑ reset/startup (CP15, SVC stack, BSS zero); ☑ polled console UART (`0xC00000F0`).
+     ☐ embassy executor · ☐ timer (`0xC0000098`) · ☐ irqchip (2-bank) ·
+     ☐ `critical-section` impl (no LDREX) · ☐ SPL (DDR init + SPI-NOR load) ·
+     ☐ hardware validation (needs a board / custom QEMU machine).
 2. **Platform HAL** — I2C, SPI-NOR, PECI, CPLD-gpio, fan scan-chain, MAC+MDIO (port the other 5
    drivers). Sensor/power/fan/PSU control (`docs/08`,`09`,`20`,`22`-`27`).
 3. **Networking** — `smoltcp` on the GXE MAC; DHCP/DNS/SNTP/syslog (RFC crates).

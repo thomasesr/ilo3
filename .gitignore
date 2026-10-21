@@ -1,15 +1,15 @@
 # Original HP firmware images — DO NOT redistribute (copyrighted); source of truth, large
-firmware/
+/firmware/
 
 # Derived from HP's copyrighted binaries (RE output) — large, not for redistribution
-decompiled/
-extracted/
+/decompiled/
+/extracted/
 
 # Upstream OpenBMC shallow clone — not our code, read-only reference (~95 MB)
-openbmc/
+/openbmc/
 
 # Third-party reference clone (Synacktiv ilo4_toolbox) — has its own git history
-research/
+/research/
 
 # Scratch / build
 *.pyc

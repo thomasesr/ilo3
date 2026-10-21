@@ -1,0 +1,6 @@
+# Pin nightly: the armv5te-none-eabi target is tier-3 (no prebuilt core),
+# so we compile core/alloc from source via -Zbuild-std (nightly-only).
+[toolchain]
+channel = "nightly"
+components = ["rust-src"]
+targets = ["armv5te-none-eabi"]

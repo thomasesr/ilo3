@@ -1,0 +1,20 @@
+# iLO 3 clean-room Rust firmware — workspace root.
+# Target: HP ProLiant DL380p Gen7 BMC (Gromit-XE ASIC, ARM926EJ-S, no_std).
+# See ../../PLAN-rust.md (roadmap) and ../../docs (RE spec).
+[workspace]
+resolver = "2"
+members = ["firmware"]
+
+# Size + bare-metal defaults for all profiles.
+[profile.release]
+panic = "abort"       # no unwinding on ARMv5 bare metal
+opt-level = "z"       # optimise for size (8 MB flash budget)
+lto = true            # whole-program; shrinks the image
+codegen-units = 1
+strip = false         # keep symbols in the ELF; strip the .bin separately
+debug = false
+overflow-checks = true
+
+[profile.dev]
+panic = "abort"
+opt-level = 1         # ARMv5 is slow; -O0 bloats badly

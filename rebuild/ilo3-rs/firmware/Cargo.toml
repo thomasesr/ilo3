@@ -1,0 +1,13 @@
+[package]
+name = "ilo3-fw"
+version = "0.0.1"
+edition = "2021"
+description = "Clean-room iLO 3 (Gromit-XE) BMC firmware — bring-up skeleton"
+
+[[bin]]
+name = "ilo3-fw"
+path = "src/main.rs"
+test = false
+bench = false
+
+[dependencies]

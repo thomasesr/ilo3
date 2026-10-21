@@ -1,0 +1,15 @@
+# iLO 3 (Gromit-XE, ARM926EJ-S / ARMv5TEJ) bare-metal build config.
+[build]
+target = "armv5te-none-eabi"
+
+[unstable]
+# Tier-3 target: build core + alloc from source (no prebuilt artifacts).
+build-std = ["core", "alloc"]
+build-std-features = ["compiler-builtins-mem"]
+
+[target.armv5te-none-eabi]
+rustflags = [
+  "-C", "link-arg=-Tlink.x",      # our linker script (firmware/link.x)
+  "-C", "link-arg=--nmagic",      # don't page-align sections (flat image)
+  "-C", "target-cpu=arm926ej-s",  # ARMv5TEJ, no VFP/NEON
+]
