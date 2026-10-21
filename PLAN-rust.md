@@ -39,7 +39,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 | ~~**Web server / HTTPS**~~ ☑ | RomPager+Allegro SSL; **58 `json/*` endpoints**; dispatch_json; cert/CSR store | HTTP + `rustls` + minimal SPA | **docs/33 done** |
 | **SSH / CLI** | the CLI command set (iLO "oemhp"/SMASH-CLP commands), auth model | SSH = `russh` (RFC 4251+); reimplement the command grammar | docs/34 (todo) |
 | **SNMP** | which MIBs/OIDs + traps iLO exposes (CPQ/compaq enterprise OIDs, health traps) | SNMP v1/v2c/v3 = a Rust SNMP agent; map the CPQHLTH/CPQSINFO OIDs to our sensor data | docs/35 (todo) |
-| **IPMI** | the KCS/CHIF transport (have it), the OEM commands HP adds | IPMI 2.0 = build the command handlers; reuse `docs/05` KCS + `docs/28` CHIF | docs/36 (todo) |
+| ~~**IPMI**~~ ☑ | IPMI 2.0 + DCMI 1.5 + HP OEM (OEMHP_POWER/RC/VM); KCS/LAN/CHIF | IPMI responder to spec | **docs/36 done** |
 | **RIBCL / XML scripting** | **HP-proprietary** — the RIBCL command/response XML schema | reimplement the parser/handlers clean from the observed schema | docs/37 (todo) |
 | **Redfish** | n/a (iLO 3 predates Redfish) | optional: a minimal Redfish subset = modern alt to RIBCL | — |
 | **Auth / users / sessions** | user DB layout in NVRAM, privilege model, session tokens | password hash (argon2/bcrypt), session mgmt — clean | docs/38 (todo) |
