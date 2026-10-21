@@ -1,0 +1,8 @@
+# Append to drivers/clocksource/Kconfig:
+config GXE_TIMER
+	bool "HP iLO3 Gromit-XE timer (clocksource)"
+	depends on ARCH_MULTI_V5 || COMPILE_TEST
+	select TIMER_OF
+	help
+	  64-bit free-running clocksource in the HP iLO 3 "Gromit-XE" BMC ASIC.
+	  (Clockevent not yet implemented — needs hardware RE of the periodic timer.)

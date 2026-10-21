@@ -1,0 +1,320 @@
+// SPDX-License-Identifier: GPL-2.0+
+/*
+ * HP iLO 3 — Gromit-XE (GXE) BMC devicetree (DRAFT)
+ *
+ * Reconstructed purely by static reverse-engineering of iLO 3 FW 1.94
+ * (Green Hills INTEGRITY firmware). Every address is PHYSICAL (the ASIC
+ * device regions are identity-mapped; see docs/10). IRQ lines are from the
+ * kernel BSP IODevice registry (see docs/12). Register offsets/bit-fields:
+ * docs/05-15. CPU/SoC identity: docs/02 (ARM926EJ-S / ARMv5TEJ, PN 438893-503).
+ *
+ * STATUS: hardware-description draft. No upstream drivers exist for these
+ * Gromit-XE blocks yet — `compatible` strings are proposed ("hpe,gxe-*").
+ * Validate on real hardware before trusting sizes/bit-fields.
+ */
+
+/dts-v1/;
+
+/ {
+	model = "HP iLO 3 (Gromit-XE)";
+	compatible = "hpe,ilo3-gxe", "hpe,gromit-xe";
+	#address-cells = <1>;
+	#size-cells = <1>;
+	interrupt-parent = <&intc>;		/* global IRQ 0-63 (docs/12) */
+
+	chosen {
+		/* custom 8-bit Gromit-XE UART (docs/05). earlycon auto-matches the
+		 * stdout-path node's compatible ("hpe,gxe-uart"); gxe-uart driver
+		 * provides both earlycon and the ttyGXE console. */
+		stdout-path = "serial0:9600n8";
+		bootargs = "earlycon console=ttyGXE0,9600n8";
+	};
+
+	aliases {
+		serial0 = &uart0;
+		ethernet0 = &mac0;		/* dedicated iLO NIC */
+		ethernet1 = &mac1;		/* sideband/shared NC-SI */
+	};
+
+	cpus {
+		#address-cells = <1>;
+		#size-cells = <0>;
+		cpu@0 {
+			device_type = "cpu";
+			compatible = "arm,arm926ej-s";	/* ARMv5TEJ, docs/02 */
+			reg = <0>;
+		};
+	};
+
+	/*
+	 * Per-process low 32 MB (FCSE). The OS address space is 0..0x02000000
+	 * (docs/04). A separate 256 MB RAM region exists at 0x20000000 (docs/13);
+	 * real DRAM size/placement needs hardware confirmation.
+	 */
+	memory@0 {
+		device_type = "memory";
+		reg = <0x00000000 0x02000000>;	/* 32 MB */
+	};
+
+	reserved-memory {
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* KVM video-capture framebuffers (docs/14) */
+		video_capture: video@b0000000 {
+			reg = <0xb0000000 0x04000000>;	/* 64 MB */
+			no-map;
+		};
+
+		/* CHIF host<->BMC shared-memory window (docs/06) */
+		chif_shmem: chif@40000000 {
+			reg = <0x40000000 0x10000000>;	/* 256 MB aperture */
+			no-map;
+		};
+	};
+
+	/*
+	 * Interrupt controller — 64 lines in 2 HW banks (docs/12). One irqchip
+	 * domain (global IRQ 0-63); the driver backs it with both register blocks:
+	 *   bank0 (IRQ 0-31)  @ 0xCEFF0000
+	 *   bank1 (IRQ 32-63) @ 0x80F00000
+	 * Per bank: enable +0x14 (active-high), status +0x0C, per-source cfg +0x100[32].
+	 */
+	intc: interrupt-controller@ceff0000 {
+		compatible = "hpe,gxe-intc";
+		reg = <0xceff0000 0x1000>,	/* bank0: IRQ 0-31  */
+		      <0x80f00000 0x1000>;	/* bank1: IRQ 32-63 */
+		interrupt-controller;
+		#interrupt-cells = <1>;
+	};
+};
+
+/ {
+	soc {
+		compatible = "simple-bus";
+		#address-cells = <1>;
+		#size-cells = <1>;
+		ranges;
+
+		/* ---- ASIC core block 0xC0000000-0xC001FFFF (docs/05,11,12,15) ---- */
+
+		/* custom 8-bit UART: data +0x00, status +0x05 (TXRDY=bit5, RXRDY=bit0) */
+		uart0: serial@c00000f0 {
+			compatible = "hpe,gxe-uart";
+			reg = <0xc00000f0 0x8>;
+			/* polled console (no IRQ wired in iLO fw) */
+		};
+
+		/*
+		 * No calendar-RTC node: the Gromit-XE has NO wall-clock RTC register
+		 * block (docs/18 corrects docs/05). 0xC0000097 is a timer latch byte
+		 * and 0xC00000A0 is a chip-ID/revision register, not date/time. The
+		 * original firmware keeps a SOFTWARE real-time clock (INTEGRITY
+		 * RealTimeClock) seeded from the 64-bit counter @0xC0000098 (see the
+		 * timer node) and set via SNTP/NTP. On OpenBMC: use the timer
+		 * clocksource for the timebase + systemd-timesyncd (SNTP) and
+		 * fake-hwclock to persist wall time across reboots. No RTC driver.
+		 */
+
+		crypto@c000000c {
+			compatible = "hpe,gxe-crypto";	/* Corsec ASIC engine, docs/05 */
+			reg = <0xc000000c 0x4>;
+		};
+
+		timer@c0000098 {
+			compatible = "hpe,gxe-timer";
+			reg = <0xc0000098 0x8>;		/* 64-bit free-running counter */
+			interrupts = <7>;		/* IODTIMER1, docs/12 */
+			/* TODO: real counter rate (strap-derived, unknown from fw) */
+			clock-frequency = <1000000>;	/* PLACEHOLDER 1 MHz - fix on HW */
+		};
+
+		/* iLO's own boot SPI-NOR controller (SMIF/gxekflsh), docs/15 */
+		spi@c0000200 {
+			compatible = "hpe,gxe-smif";
+			reg = <0xc0000200 0x80>;	/* regs + 64-byte data FIFO @+0x40 */
+			interrupts = <26>, <27>, <28>;	/* IODSPI0-2, docs/12 */
+			#address-cells = <1>;
+			#size-cells = <0>;
+			flash@0 {
+				compatible = "jedec,spi-nor";
+				reg = <0>;
+				/* partition per docs/01,03 (boot ROM, main img, kernel, certs) */
+			};
+		};
+
+		/* system control: reset (GXELAN reset @+0xC0), clock/strap config */
+		coresys: syscon@c0000000 {
+			compatible = "hpe,gxe-syscon", "syscon";
+			reg = <0xc0000000 0x200>;
+		};
+
+		/* ---- GXELAN Ethernet — 2 NICs (docs/11) ---- */
+		mac0: ethernet@c0004000 {		/* dedicated iLO port */
+			compatible = "hpe,gxe-gmac";
+			reg = <0xc0004000 0x1000>;
+			interrupts = <16>;		/* IODMAC0, docs/12 */
+			hpe,core-syscon = <&coresys>;	/* reset @+0xC0 */
+			phy-mode = "mii";
+			phy-handle = <&phy_dedicated>;
+
+			mdio {
+				compatible = "hpe,gxe-mdio";	/* reg @+0x80/+0x84 */
+				#address-cells = <1>;
+				#size-cells = <0>;
+				phy_dedicated: ethernet-phy@0 {
+					reg = <0>;
+				};
+			};
+		};
+
+		mac1: ethernet@c0005000 {		/* sideband / shared NC-SI */
+			compatible = "hpe,gxe-gmac";
+			reg = <0xc0005000 0x1000>;
+			interrupts = <17>;		/* IODMAC1, docs/12 */
+			hpe,core-syscon = <&coresys>;	/* reset @+0xC0 */
+			/* shared path uses NC-SI to host LOM (phosphor-networkd + ncsi) */
+		};
+
+		/* GXELAN MAC DMA / secondary regs (docs/13) */
+		mac-dma@a1000000 {
+			compatible = "hpe,gxe-gmac-dma";
+			reg = <0xa1000000 0x4000>;
+		};
+
+		/* ---- Peripheral window 0x01F00000 (docs/05,06,08,09,14) ---- */
+
+		/*
+		 * Native PECI engine (CPU DTS temp, RdPkgConfig, RdPCIConfig) — docs/26.
+		 * In the 0x01F00000 window at +0x400 (NOT CPLD +0x68, which is only the
+		 * XNC target MUX). Engine regs: CMD +0x00, STATUS +0x04, bit-timing
+		 * +0x08, enable +0x0C. IRQ 60. hpe,cpld = the CPLD for multi-node MUX.
+		 */
+		peci@1f00400 {
+			compatible = "hpe,gxe-peci";
+			reg = <0x1f00400 0x10>;
+			interrupts = <60>;		/* IODPECI, docs/12 */
+			hpe,cpld = <&cpld>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		/*
+		 * Fan controller (docs/25). NOT a flat per-fan PWM-duty register
+		 * array: PWM is a CPLD-driven SERIAL scan chain (open-drain FET
+		 * bits clocked out, periodic RESYNC) + TACH scan-chain inputs
+		 * (FAN_1..6_TACH, 6 fans). Spans this block + CPLD 0x01F14000 +0x0B.
+		 * Driver = net-new "gxe-fan-scanchain" hwmon (pwmN/fanN_input);
+		 * no aspeed-pwm-tacho equivalent. host SDR defines fan count.
+		 */
+		fan@1f00200 {
+			compatible = "hpe,gxe-fan-scanchain";
+			reg = <0x1f00200 0x20>;		/* CTRL+0x0C, DATA+0x10-0x17, TACH+0x18/0x1C */
+			interrupts = <55>;		/* IODFAN, docs/12 */
+			hpe,cpld = <&cpld>;		/* latch strobe = CPLD 0x01F1400B bit1 */
+			hpe,num-fans = <6>;		/* FAN_1..6_TACH */
+			/* hpe,tach-divisor = <N>;  raw->RPM scale, set on HW (docs/27) */
+		};
+
+		/* Gromit-XE host interface: CHIF messaging + host power + VAS + SMBIOS.
+		 * Host sees this as PCI fn .0/.2 (103c:3306/3307). docs/06.
+		 * BAR reg +0x50, CHIF doorbell +0xD0/+0xD4 (IC0 line?), host-power +0x46,
+		 * VAS +0x54, SMBIOS +0xA0. Second doorbell/status block at 0x01F03000.
+		 */
+		host-interface@1f02000 {
+			compatible = "hpe,gxe-chif";
+			reg = <0x1f02000 0x1000>,	/* CHIF/host-power/VAS/SMBIOS */
+			      <0x1f03000 0x1000>;	/* doorbell/status (+0x04 bit2=msg) */
+			reg-names = "chif", "doorbell";
+			memory-region = <&chif_shmem>;
+		};
+
+		/* IPMI KCS + watchdog (docs/05) */
+		kcs@1f0d400 {
+			compatible = "hpe,gxe-kcs";
+			reg = <0x1f0d400 0x400>;
+			interrupts = <44>;		/* IODLEGACYKCS, docs/12 */
+		};
+
+		watchdog@1f0d480 {
+			compatible = "hpe,gxe-wdt";
+			reg = <0x1f0d480 0x80>;		/* WDT within the KCS block */
+		};
+
+		/* host System-ROM (BIOS) SPI access via SMIF/romchf (docs/15) */
+		spi-host@1f10000 {
+			compatible = "hpe,gxe-host-smif";
+			reg = <0x1f10000 0x100>;
+		};
+
+		/* KVM video-capture controller (docs/14) */
+		video@1f100c0 {
+			compatible = "hpe,gxe-video";
+			reg = <0x1f100c0 0x40>,		/* DVC capture control + status (docs/14) */
+			      <0x1f06000 0x40>;		/* host-video source/snoop block */
+			reg-names = "capture", "source";
+			interrupts = <57>;		/* IODIRC, docs/12 */
+			memory-region = <&video_capture>;	/* 0xB0000000 64MB framebuffers */
+		};
+
+		/*
+		 * I2C/SMBus — 8 DMA engines sharing one register/buffer/descriptor
+		 * block (docs/05). The driver registers 8 adapters:
+		 *   engine regs  0x1F10100 + eng*0x10 (status+0, ctrl+1, data+4, cmd+8)
+		 *   TX/RX buffer 0x1F10180 + eng*0x10 (+0x200 for eng 6,7), 16 B max
+		 *   descriptor   0x1F101E0 + eng*4   (status+0, cmd+1, len+2)
+		 */
+		i2c: i2c@1f10100 {
+			compatible = "hpe,gxe-i2c";
+			reg = <0x1f10100 0x300>;	/* engine regs + buffers (eng6-7 @+0x200) + descriptors */
+			interrupts = <8>, <9>, <10>, <11>, <12>, <13>, <14>, <15>;
+			#address-cells = <1>;
+			#size-cells = <0>;
+		};
+
+		/* CPLD + power-microcontroller block (docs/08,09).
+		 * Chassis UID LED = reg +0x00 bit6; UID button = CPLD interrupt
+		 * (+0x08/+0x2C). Also host-power seq, PSU, PECI, pwrmgr.
+		 */
+		cpld: syscon@1f14000 {
+			compatible = "hpe,gxe-cpld-gpio", "hpe,gxe-cpld", "syscon";
+			reg = <0x1f14000 0x200>;
+			interrupts = <31>;		/* IODPWRMGR, docs/12 */
+			/*
+			 * GPIO view of the CPLD register window: gpio N = byte
+			 * (N>>3) bit (N&7). gpio 6 = reg+0x00 bit6 = chassis UID
+			 * (CONFIRMED). Other discrete lines by number (docs/09):
+			 *   reg+0x00 bit7 = CPLD status   -> gpio 7
+			 *   reg+0x18 bits0-3 = PSU enable  -> gpio 192-195 (inferred)
+			 *   reg+0x19 bits0-3 = PSU present -> gpio 200-203 (inferred)
+			 */
+			gpio-controller;
+			#gpio-cells = <2>;
+			gpio-line-names = "", "", "", "", "", "", "chassis-uid-led";
+		};
+
+		/* Timer / "Wallace" companion block (docs/12) */
+		/* Wallace companion timer = Linux clockevent (periodic tick). */
+		timer@d1000000 {
+			compatible = "hpe,gxe-wallace";
+			reg = <0xd1000000 0x10000>;
+			interrupts = <36>;		/* IODWALLACE, docs/12 */
+			/* TODO real rate; clockevent reload/ack offsets are best-guess */
+			clock-frequency = <1000000>;	/* PLACEHOLDER 1 MHz - fix on HW */
+		};
+	};
+
+	/*
+	 * Chassis UID / locator LED — driven via CPLD reg 0x01F14000 +0x00 bit6
+	 * (docs/08). UID button = CPLD interrupt. Needs a CPLD-gpio driver;
+	 * wire gpios once that exists.
+	 */
+	leds {
+		compatible = "gpio-leds";
+		led-uid {
+			label = "ilo3:blue:uid";
+			gpios = <&cpld 6 0>;	/* CPLD reg+0x00 bit6, active-high */
+		};
+	};
+};

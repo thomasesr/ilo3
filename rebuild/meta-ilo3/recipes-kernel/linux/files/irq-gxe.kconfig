@@ -1,0 +1,8 @@
+# Append to drivers/irqchip/Kconfig:
+config GXE_IRQ
+	bool "HP iLO3 Gromit-XE interrupt controller"
+	depends on ARCH_MULTI_V5 || COMPILE_TEST
+	select IRQ_DOMAIN
+	help
+	  Root interrupt controller in the HP iLO 3 "Gromit-XE" BMC ASIC
+	  (two 32-line banks, 64 IRQs).
