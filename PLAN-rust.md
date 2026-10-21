@@ -112,7 +112,9 @@ we have its architecture; detail is done just-in-time per feature.
 - ~~**Fan control algorithm**~~ ☑ **docs/42** — sensor→PWM grouping (SINGLE/FASTEST/AVERAGE), per-PWM
   Min/Max/Hyst/Blow/Lock; **fail-safe = force MAX on sensor-fault, OS-shutdown on critical**. (NOT PID;
   PID is power-cap.) Demand curve + SDR thresholds + groupings = board data (RE on HW / SDR dump).
-- **Power-capping / regulator algorithm** (446) — dynamic power, APO. → `docs/43`
+- ~~**Power-capping / regulator**~~ ☑ **docs/43** — Power Regulator (4 P-state modes: OS/Dynamic/
+  StaticLow/StaticHigh) + power-cap PID (the BURN PID over ROM-CHIF → CPU F-stop). iLO=controller,
+  BIOS=actuator. (Fan/thermal is the BIOS's, not iLO's — docs/42 corrected.)
 - **FUM** firmware-update flow (88) — component types, flash staging, the signed-component format.
 - **IRC / KVM streaming protocol** (301) — DVC capture→encode→encrypt→stream is mapped (docs/14),
   but the IRC *client wire protocol* (dvcnet) is not. Only if remote console is a goal.
@@ -122,6 +124,6 @@ we have its architecture; detail is done just-in-time per feature.
 
 ### Priority for a *minimal, safe* BMC
 1. ~~Fan control algorithm (docs/42)~~ ☑ — model done; demand curve/thresholds = board data (HW/SDR).
-2. Power-cap/regulator (docs/43) — needed for power features + to not trip the host.
+2. ~~Power-cap/regulator (docs/43)~~ ☑ — Power Regulator modes + cap PID (ROM-CHIF). Fan=BIOS (docs/42).
 3. NTP/syslog/SMTP + LDAP config — standard, straightforward.
 4. Everything else (SSO/2FA/WS-Man/ERS/IRC/VSP) — feature-by-feature, as scope grows.

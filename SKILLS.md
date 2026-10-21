@@ -49,7 +49,7 @@ threads; keep static RAM small; prefer ChaCha20-Poly1305 (no AES HW); SNTP-seed 
 - [ ] **Fan control** — ✅ model RE'd (docs/42): grouping (FASTEST default) + **fail-safe force-MAX**; demand curve/thresholds = board data (HW-validate!)
 - [ ] Power control (on/off/reset/NMI/CSM) + state machine — `docs/24`
 - [ ] PSU telemetry (panda SMBus) — `docs/20` · [ ] UID/health LEDs — `docs/08`
-- [ ] Power capping/regulator algorithm — **RE still needed** (`docs/43` todo)
+- [ ] Power Regulator (4 P-state modes) + optional power-cap PID over ROM-CHIF — docs/43 (fan=BIOS, docs/42)
 - [ ] Inventory (CPU/mem via host SMBIOS over ROM-CHIF) — `docs/22`
 - [ ] Drive backplane (SEP I2C frames) — `docs/23`
 

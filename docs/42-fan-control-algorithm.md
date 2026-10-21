@@ -4,7 +4,23 @@ Date: 2026-10-21. Static RE of `os_main_base0.bin` (fan controller `~0x118000-0x
 Maps the thermal→fan algorithm. **This is safety-critical**: a wrong reimplementation overheats
 and damages the hardware. The rewrite MUST reproduce the fail-safe behaviour exactly.
 
-## Model: sensor→PWM grouping algorithms (NOT PID)
+## CORRECTION (ownership): the System ROM/BIOS owns thermal policy, not iLO
+
+On ProLiant **G7**, the **System ROM (BIOS) runs the fan/thermal control policy** — iLO is
+**monitor + actuator + fail-safe**, not the thermal brain. Evidence: the BIOS↔iLO mailbox
+(`ROMCHIF_MSGID_*`) carries only **power** messages (BURN/cap PID, CPU F-stop, topology) — **no
+fan/thermal command**. The per-sensor demand curve + thresholds + sensor→PWM groupings are
+**platform/SDR data the BIOS provisions**, not iLO logic. So the grouping algorithm below is iLO's
+**actuation/application layer** (apply the targets the platform sets) + its hardware-level
+**fail-safe**, not an autonomous control loop.
+
+**For the Rust rewrite, iLO's fan responsibility is small**: (1) read temps/fan-status/tach for
+health/SNMP/IML; (2) drive the PWM scan-chain as directed; (3) the **fail-safe** (force MAX on
+sensor fault / controller stall / critical). The normal thermal *policy* is the BIOS's — the
+rewrite does NOT reimplement the thermal brain. This also removes most of the "safety-critical
+algorithm" burden (the fail-safe net remains iLO's and is simple: default/fault ⇒ MAX).
+
+## Model: sensor→PWM grouping algorithms (iLO actuation layer)
 
 Fan control is **not** a PID loop. (The PID strings in the image — `ROMCHIF_MSGID_BURN_SET_PID_*` —
 are the separate **power-cap** controller, `docs/43`.) The fan model:
