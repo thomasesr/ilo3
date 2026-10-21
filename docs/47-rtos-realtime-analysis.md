@@ -27,7 +27,14 @@ the escalation ladder is: **embassy (now) → RTIC 2 → FreeRTOS-rust (last res
   but puts a C kernel in an otherwise pure-Rust image.
 
 The HAL/services sit above the executor, and RTIC 2 reuses embassy-style async, so a later swap
-is contained.
+is contained. **Confirmed by RTIC upstream** (rtic.rs/2/book `rtic_and_embassy.html`): RTIC and
+embassy are not rivals on one axis — embassy = HAL + executor + runtime; RTIC = a
+scheduling/resource-protection framework that *consumes* a HAL (embassy's). The libraries are
+runtime-agnostic (embassy HALs, `embassy-sync`, `rtic-monotonics`/`embassy-time`, smoltcp/rustls
+work under both). So **only the top executor shell swaps**; the ~90% that is drivers + protocol
+stacks + services ports unchanged. The RTIC ARMv5 backend is the only RTIC-specific cost and is
+orthogonal to that code. End-state could be **RTIC priorities over embassy HALs** = both benefits.
+"embassy for now" is therefore a low-risk, non-locking choice, not a bet on the executor.
 
 **Carry-forward risk:** a long-running `rustls` op (RSA/ECDHE, tens–hundreds ms on 250 MHz
 ARMv5) blocks the cooperative executor. Mitigations to design in from the start: keep TLS
