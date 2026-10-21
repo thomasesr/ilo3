@@ -40,7 +40,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 | ~~**SSH / CLI**~~ ☑ | RomSShell 4.62; SMASH CLP + HP verbs (power/vm/vsp/textcons); /map1 + /system1 tree | `russh` (modern only) + SMASH CLP engine | **docs/34 done** |
 | ~~**SNMP**~~ ☑ | v1/v2c (no v3); CPQ MIBs (CPQRIB3/CPQCIDRV/cpqHlth); power/host/health traps ×3 dest; +email(SMTP) | Rust agent (+add v3); public CPQ MIBs → our data | **docs/35 done** |
 | ~~**IPMI**~~ ☑ | IPMI 2.0 + DCMI 1.5 + HP OEM (OEMHP_POWER/RC/VM); KCS/LAN/CHIF | IPMI responder to spec | **docs/36 done** |
-| **RIBCL / XML scripting** | **HP-proprietary** — the RIBCL command/response XML schema | reimplement the parser/handlers clean from the observed schema | docs/37 (todo) |
+| ~~**RIBCL / XML scripting**~~ ☑ | XML envelope; 7 info blocks; ~180 cmds (GET_EMBEDDED_HEALTH, SET_HOST_POWER, MOD_*) | quick-xml handler; Redfish primary + minimal RIBCL | **docs/37 done** |
 | **Redfish** | n/a (iLO 3 predates Redfish) | optional: a minimal Redfish subset = modern alt to RIBCL | — |
 | ~~**Auth / users / sessions**~~ ☑ | 12 users; bcrypt; privilege bitmap (login/RC/vmedia/power/config/admin+ext) | argon2 + bitflags; enforce everywhere | **docs/38 done** |
 | **Network services** | DHCP/DNS/SNTP/syslog client config in NVRAM | all RFC standards: `smoltcp` DHCP, SNTP, syslog, mDNS | — |
@@ -71,7 +71,7 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 3. ~~SSH CLI~~ ☑ **docs/34** — RomSShell; SMASH CLP + HP verbs; /map1 + /system1 tree.
 4. ~~SNMP~~ ☑ **docs/35** — v1/v2c, CPQ MIBs, power/host/health traps + email alerts.
 5. ~~NVRAM + users~~ ☑ **docs/38** — K-V config store + 12-user DB, bcrypt, privilege bitmap.
-6. **RIBCL XML schema** (docs/37) — proprietary; RE the command/response grammar.
+6. ~~RIBCL~~ ☑ **docs/37** — XML envelope, 7 info blocks, ~180 commands (publicly documented).
 7. **IML/event log format** (docs/39).
 
 ## Key constraints (carry forward)
