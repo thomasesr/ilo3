@@ -42,11 +42,11 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 | ~~**IPMI**~~ ☑ | IPMI 2.0 + DCMI 1.5 + HP OEM (OEMHP_POWER/RC/VM); KCS/LAN/CHIF | IPMI responder to spec | **docs/36 done** |
 | **RIBCL / XML scripting** | **HP-proprietary** — the RIBCL command/response XML schema | reimplement the parser/handlers clean from the observed schema | docs/37 (todo) |
 | **Redfish** | n/a (iLO 3 predates Redfish) | optional: a minimal Redfish subset = modern alt to RIBCL | — |
-| **Auth / users / sessions** | user DB layout in NVRAM, privilege model, session tokens | password hash (argon2/bcrypt), session mgmt — clean | docs/38 (todo) |
+| ~~**Auth / users / sessions**~~ ☑ | 12 users; bcrypt; privilege bitmap (login/RC/vmedia/power/config/admin+ext) | argon2 + bitflags; enforce everywhere | **docs/38 done** |
 | **Network services** | DHCP/DNS/SNTP/syslog client config in NVRAM | all RFC standards: `smoltcp` DHCP, SNTP, syslog, mDNS | — |
 | **Event / IML log** | the IML record format in NVRAM/flash | reimplement the record store clean | docs/39 (todo) |
 | **LDAP / directory auth** | the directory integration config | LDAP client to spec | — |
-| **NVRAM / config store** | the settings layout in flash/NVRAM (keys, offsets) | a clean Rust config store (may keep layout for migration) | docs/40 (todo) |
+| ~~**NVRAM / config store**~~ ☑ | named K-V store (NvramDisk); CFG_READ/WRITE by name; per-key priv/size | wear-leveled Rust K-V store | **docs/38 done** |
 
 ## Build phases
 
@@ -70,7 +70,7 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 2. **IPMI OEM commands** (docs/36) — transport already mapped (KCS/CHIF); RE the HP OEM command set.
 3. ~~SSH CLI~~ ☑ **docs/34** — RomSShell; SMASH CLP + HP verbs; /map1 + /system1 tree.
 4. ~~SNMP~~ ☑ **docs/35** — v1/v2c, CPQ MIBs, power/host/health traps + email alerts.
-5. **NVRAM/config + user DB** (docs/40/38) — settings + auth storage layout.
+5. ~~NVRAM + users~~ ☑ **docs/38** — K-V config store + 12-user DB, bcrypt, privilege bitmap.
 6. **RIBCL XML schema** (docs/37) — proprietary; RE the command/response grammar.
 7. **IML/event log format** (docs/39).
 
