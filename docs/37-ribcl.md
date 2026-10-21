@@ -23,6 +23,20 @@ Response: `<RESPONSE STATUS="0x0000" MESSAGE="No error"/>` (hex status; `SYNTAX 
 failure), with data elements for GET_* commands. Each **info block** is opened/closed
 (`OPEN_*_INFO`/`CLOSE_*_INFO`) and carries a `MODE="read"|"write"`.
 
+## Schema semantics (confirmed vs the public HP iLO 3 Scripting & CLI Guide)
+
+- **`LOGIN`** — provides authentication (`USER_LOGIN`/`PASSWORD`); the user needs a valid iLO
+  account with sufficient privilege. All info blocks nest **inside** a `LOGIN` block.
+- **`MODE="read"|"write"`** — each info block requires it. **`write` = read + write** (editing
+  allowed); **`read` = read-only** (modification rejected). Opening a block in write mode reads the
+  relevant config DB into memory for editing; `CLOSE_*_INFO` commits.
+- **`RESPONSE`** — `STATUS` is an error number (**`0x0000` = no error**), `MESSAGE`/`MSG` describes
+  any error; `SYNTAX ERROR` on parse failure. GET_* commands return data elements alongside.
+- Example: `GET_EMBEDDED_HEALTH` is issued inside a `SERVER_INFO MODE="read"` block.
+
+This RE (FW 1.94 command set) matches the published guide — so reimplement to the **guide's schema**
+(per-command attributes/elements), using this doc as the confirmed inventory.
+
 ## Info blocks (7+)
 
 `USER_INFO` (accounts), `RIB_INFO` (iLO config: network, firmware, logs, certs, SNMP),
@@ -69,3 +83,9 @@ store (`docs/38`). RIBCL is an XML veneer over the same functions as the web/CLI
   guide + observed responses).
 - The full 180-command enumeration + which are no-ops/unsupported in FW 1.94.
 - `hponcfg` (local RIBCL over a device, not the network port) if local scripting parity is wanted.
+
+## Reference (public HP docs — the schema source)
+
+- HP iLO 3 Scripting and Command Line Guide (RIBCL / RIB_INFO / base commands) — HPE support docs
+  `a00018323`/`sd00002199`; mirrors on manualzz. Build the per-command schema from these + this
+  confirmed command inventory (clean-room: use the published schema, not HP code).
