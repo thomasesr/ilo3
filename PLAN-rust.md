@@ -63,7 +63,10 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
      ☑ timer (64-bit monotonic `0xC0000098` + `delay_us`; Wallace clockevent `0xD1000000`/IRQ36
      register-exact — `src/timer.rs`) · ☑ irqchip (2-bank, 64 IRQs — `src/intc.rs`) ·
      ☑ ARM exception vectors + root IRQ dispatch (disasm-verified — `src/vectors.rs`).
-     ☐ embassy executor (custom ARMv5 `Pender` + `embassy-time-driver` over the timer) ·
+     ☑ embassy executor on ARMv5 (`embassy-executor` 0.10 `platform-spin`; 2 async tasks
+     interleave via `yield_now`). Needed a custom target (`armv5te-ilo3.json`, `atomic-cas`)
+     + `__atomic_*` single-core libcall shims (`src/atomics.rs`) — ARM926 has no LDREX.
+     ☐ `embassy-time-driver` over the timer (real `Timer::after`; rides on the Wallace tick IRQ) ·
      ☐ MMU bring-up (ARM926 vector base `0x0`/`0xFFFF0000` → unblocks live IRQ delivery) ·
      ☐ SPL (DDR init + SPI-NOR load) · ☐ hardware validation (board / custom QEMU machine).
 2. **Platform HAL** — I2C, SPI-NOR, PECI, CPLD-gpio, fan scan-chain, MAC+MDIO (port the other 5

@@ -14,3 +14,14 @@ bench = false
 # Single-core critical section via CPSR IRQ masking (ARMv5 has no LDREX, so
 # core::sync::atomic + embassy-sync route through this). Impl in src/critsec.rs.
 critical-section = { version = "1.2", features = ["restore-state-bool"] }
+
+# armv5te-none-eabi has NO target_has_atomic (no native atomics at all), so
+# core::sync::atomic is unavailable. portable-atomic emulates it via our
+# critical-section impl; embassy routes its atomics through it.
+portable-atomic = { version = "1", default-features = false, features = ["critical-section"] }
+
+# Async executor. `platform-spin` = busy-wait park (no cortex-m/WFI arch needed),
+# which suits Phase 1's poll loop (live IRQ wakeups gated on the MMU sub-phase).
+embassy-executor = { version = "0.10", default-features = false, features = ["executor-thread", "platform-spin"] }
+embassy-futures = "0.1"
+static_cell = "2"

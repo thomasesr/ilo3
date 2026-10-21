@@ -12,6 +12,10 @@ use core::arch::global_asm;
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;
 
+use embassy_executor::Executor;
+use static_cell::StaticCell;
+
+mod atomics; // __atomic_* libcall shims (single-core, no LDREX on ARMv5)
 mod critsec; // critical-section impl (CPSR IRQ mask) — registered via set_impl!
 mod intc; // 2-bank Gromit-XE irqchip
 mod timer; // 64-bit monotonic counter + Wallace clockevent
@@ -81,19 +85,41 @@ pub extern "C" fn rust_main() -> ! {
         timer::TIMER_HZ
     );
 
-    let t0 = timer::now_ticks();
-    for tick in 0u32.. {
+    let _ = writeln!(con, "[ilo3-rs] starting embassy executor (platform-spin)...");
+
+    // Hand the console to the async world and start the cooperative executor.
+    let executor = EXECUTOR.init(Executor::new());
+    executor.run(|spawner| {
+        spawner.spawn(heartbeat().unwrap());
+        spawner.spawn(ticker().unwrap());
+    });
+}
+
+static EXECUTOR: StaticCell<Executor> = StaticCell::new();
+
+/// Proof-of-life async task: prints the monotonic counter once a second,
+/// yielding the executor between beats so `ticker` interleaves.
+#[embassy_executor::task]
+async fn heartbeat() {
+    let mut con = Uart::console();
+    let mut n = 0u32;
+    loop {
+        let _ = writeln!(con, "[hb] heartbeat {} — monotonic={}", n, timer::now_ticks());
+        n = n.wrapping_add(1);
         timer::delay_us(1_000_000);
-        let now = timer::now_ticks();
-        let _ = writeln!(
-            con,
-            "[ilo3-rs] tick {} — monotonic={} (+{} ticks)",
-            tick,
-            now,
-            now.wrapping_sub(t0)
-        );
+        embassy_futures::yield_now().await; // cooperative hand-off
     }
-    unreachable!()
+}
+
+/// Second task — demonstrates the executor interleaving two futures.
+#[embassy_executor::task]
+async fn ticker() {
+    let mut con = Uart::console();
+    loop {
+        let _ = writeln!(con, "[tk] .");
+        timer::delay_us(1_000_000);
+        embassy_futures::yield_now().await;
+    }
 }
 
 #[panic_handler]

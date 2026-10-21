@@ -1,13 +1,21 @@
 # iLO 3 (Gromit-XE, ARM926EJ-S / ARMv5TEJ) bare-metal build config.
+#
+# Custom target (armv5te-ilo3.json): identical to the stock armv5te-none-eabi
+# except it claims atomic-cas + max-atomic-width=32. ARM926 has no LDREX, so
+# LLVM lowers atomic CAS to __sync_*_4 / __atomic_*_4 libcalls, which we provide
+# in firmware/src/atomics.rs as interrupt-masking (single-core) shims. This is
+# what lets embassy-executor (which uses core::sync::atomic CAS) build here.
 [build]
-target = "armv5te-none-eabi"
+target = "armv5te-ilo3.json"
 
 [unstable]
 # Tier-3 target: build core + alloc from source (no prebuilt artifacts).
 build-std = ["core", "alloc"]
 build-std-features = ["compiler-builtins-mem"]
+# Allow the custom .json target spec (armv5te-ilo3.json).
+json-target-spec = true
 
-[target.armv5te-none-eabi]
+[target.armv5te-ilo3]
 rustflags = [
   "-C", "link-arg=-Tlink.x",      # our linker script (firmware/link.x)
   "-C", "link-arg=--nmagic",      # don't page-align sections (flat image)
