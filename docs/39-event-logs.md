@@ -69,3 +69,16 @@ when full. Coalescing keeps it compact. Survives reboots; cleared via `CLEAR_IML
 - The exact on-flash record binary layout + the IML class/code → description table (RE
   just-in-time; standard HP IML classes, many → `EVT_*` above).
 - AHS binary format (only if AHS compatibility is wanted — unlikely for a clean rewrite).
+
+## Reference + cross-generation notes (public HP docs)
+
+- The full **IML event catalog** (every class/code → message, severity, recommended action) is the
+  separate HP **"Integrated Management Log Messages"** guide. Use it as the authoritative source
+  for the Rust rewrite's class/code → description table (clean-room: build to the published
+  catalog, not HP code). The `EVT_*` list above are the internal event sources that map into it.
+- **Cross-generation**: later iLO (5/6/7, HPE docs `sd00005342`) split out a **dedicated Security
+  Log** (logins, auth, cert/key changes) from the IML + iLO event log. **iLO 3 has no separate
+  security log** — security events ride the **iLO event log** (`MapRecord` + `Event_UsernameIPAddress`,
+  above). The rewrite may add a dedicated security log (modern practice) on top of the same store.
+- IML severities + the view/filter/clear model are consistent iLO 3 → iLO 7, so the record model
+  here ports forward.
