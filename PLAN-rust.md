@@ -44,7 +44,7 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
 | **Redfish** | n/a (iLO 3 predates Redfish) | optional: a minimal Redfish subset = modern alt to RIBCL | — |
 | ~~**Auth / users / sessions**~~ ☑ | 12 users; bcrypt; privilege bitmap (login/RC/vmedia/power/config/admin+ext) | argon2 + bitflags; enforce everywhere | **docs/38 done** |
 | **Network services** | DHCP/DNS/SNTP/syslog client config in NVRAM | all RFC standards: `smoltcp` DHCP, SNTP, syslog, mDNS | — |
-| **Event / IML log** | the IML record format in NVRAM/flash | reimplement the record store clean | docs/39 (todo) |
+| ~~**Event / IML log**~~ ☑ | IML(SystemRecord)+iLO log(MapRecord): coalescing severity records; AHS telemetry | circular wear-leveled store + EventBus | **docs/39 done** |
 | **LDAP / directory auth** | the directory integration config | LDAP client to spec | — |
 | ~~**NVRAM / config store**~~ ☑ | named K-V store (NvramDisk); CFG_READ/WRITE by name; per-key priv/size | wear-leveled Rust K-V store | **docs/38 done** |
 
@@ -72,7 +72,7 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 4. ~~SNMP~~ ☑ **docs/35** — v1/v2c, CPQ MIBs, power/host/health traps + email alerts.
 5. ~~NVRAM + users~~ ☑ **docs/38** — K-V config store + 12-user DB, bcrypt, privilege bitmap.
 6. ~~RIBCL~~ ☑ **docs/37** — XML envelope, 7 info blocks, ~180 commands (publicly documented).
-7. **IML/event log format** (docs/39).
+7. ~~IML/event log~~ ☑ **docs/39** — IML+iLO log coalescing records (sev/count/ts); AHS; one store.
 
 ## Key constraints (carry forward)
 
