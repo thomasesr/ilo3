@@ -4,15 +4,30 @@ Guidance for Claude Code working in this repository.
 
 ## Project Objective
 
-Analyze the firmware/software for **HP iLO 3** (Integrated Lights-Out 3),
-a product that is no longer supported by HP/HPE. The goal is to identify hardware specific stuff to allow to port OpenBMC and add support for OpenBMC on G7 Proliant servers.
-get info from the shipped binaries.
+Reverse-engineer the firmware for **HP iLO 3** (Integrated Lights-Out 3), an EOL HP/HPE BMC,
+and build a **modern open replacement** for the Gromit-XE (iLO 3) BMC on G7 ProLiant servers.
+
+**Direction (updated): a clean-room BMC firmware rewrite in Rust** — NOT an OpenBMC port.
+OpenBMC was evaluated and **does not fit** the hardware (250 MHz ARMv5, ~60 MB usable RAM,
+8 MB flash vs OpenBMC's ~256-512 MB / 32-64 MB assumption). A lean `no_std` Rust firmware is
+the right-sized target. See **`PLAN-rust.md`** (the rewrite roadmap + RE coverage audit) and
+**`PLAN.md`** (the superseded OpenBMC-port plan, kept for reference).
 
 Work in scope:
-- analyse iLO 3 firmware images / binaries into readable source (C/assembly).
-- Document the binary layout, architecture, and runtime behavior.
-- Identify hardware specific entrys and port OpenBMC.
-- Produce artifacts that allow building or flashing updated alternative OpenBMC firmware.
+- Reverse-engineer the iLO 3 firmware to register-exact hardware maps + service contracts
+  (the clean-room source for the rewrite). Status: hardware/HAL + all major services done
+  (`docs/02`-`41`); remaining gaps tracked in `PLAN-rust.md` (fan-control algo is the
+  safety-critical one).
+- **Rebuild as Rust** (`rebuild/ilo3-rs/`, to be scaffolded): `no_std` + embassy/smoltcp/rustls,
+  HAL from the 9 RE-derived drivers, management services reimplemented from the RE'd contracts.
+- Unlock the hardware for unsigned boot (no silicon root of trust; flash patch `docs/31`).
+- **Clean-room discipline**: hardware register maps are facts (use directly); standard protocols
+  (HTTP/SSH/SNMP/IPMI/NTP/LDAP) reimplement from RFCs + crates; HP-proprietary wire formats
+  (RIBCL/CHIF/DVC/IML) reimplement from the RE'd behaviour, never by copying HP code.
+
+> **Legacy note**: the `rebuild/meta-ilo3/` OpenBMC layer + 9 Linux drivers remain as the
+> hardware-RE reference (register maps, driver logic). They port directly to the Rust HAL.
+> The OpenBMC build path itself is shelved (doesn't fit the resources).
 
 ## Background: What iLO 3 Is
 
