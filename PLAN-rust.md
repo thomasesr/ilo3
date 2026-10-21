@@ -19,7 +19,10 @@ footprint does not fit (see the resource analysis in the chat / PLAN.md).
 ## Architecture (target)
 
 - **`no_std` Rust** firmware, boots from flash (reuse DDR/clock init `docs/30`, reset `docs/31`).
-- **`embassy`** async executor; HAL modules = Rust ports of the 9 drivers already written.
+- **`embassy`** async executor (DECIDED 2026-10-21, see docs/47 — iLO 3 has no hard-RT
+  requirement; event-driven soft-RT only, so no preemptive RTOS. Reversible "for now";
+  fallback = FreeRTOS-rust/ARM926 if slow-crypto fairness bites). HAL modules = Rust ports of
+  the 9 drivers already written. Safety (watchdog/thermal fail-safe) = timer ISR above the executor.
 - **`smoltcp`** TCP/IP; **`rustls`** TLS (replaces Allegro/klite — `docs/32`).
 - Workspace layout (proposed): `rebuild/ilo3-rs/` with crates `hal/`, `net/`, `crypto/`,
   `services/` (web, ssh, snmp, ipmi), `boot/` (SPL), `bin/` (the firmware image).
@@ -81,6 +84,10 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 - **TLS perf**: software crypto on 250 MHz ARMv5 is slow — prefer ECDHE + ChaCha20-Poly1305, use
   session resumption, keep the web surface small.
 - **Flash 8 MB**: keep the image tiny; `no_std` Rust helps. A 16/32 MB flash swap buys headroom.
+- **Cooperative-exec crypto risk** (docs/47): embassy can't slice a running `rustls` primitive;
+  a long RSA/ECDHE op (tens–hundreds ms on 250 MHz ARMv5) stalls the executor. Design around it:
+  ECDHE+ChaCha20, session resumption, small TLS surface, crypto off the hot path (preemptive
+  worker if measured bad). This is the one place the embassy choice is load-bearing.
 - **ARMv5 Rust**: tier-3-ish; `core::sync::atomic` needs `critical-section`/`portable-atomic`
   (no native LDREX/STREX pre-ARMv6). Expect this friction early in bring-up.
 
