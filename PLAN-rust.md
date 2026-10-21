@@ -83,3 +83,44 @@ Do the RE just-in-time, one subsystem per pass, each → a `docs/NN`:
 - **Flash 8 MB**: keep the image tiny; `no_std` Rust helps. A 16/32 MB flash swap buys headroom.
 - **ARMv5 Rust**: tier-3-ish; `core::sync::atomic` needs `critical-section`/`portable-atomic`
   (no native LDREX/STREX pre-ARMv6). Expect this friction early in bring-up.
+
+## RE coverage audit (what's done vs what's left)
+
+**No, the entire binary is NOT reverse-engineered — and it doesn't need to be.** Of the ~12 MB
+image: a large fraction is **static web-UI assets** (HTML/JS/CSS, jQuery, language packs) that the
+rewrite *replaces* with a new SPA, and another large fraction is **third-party libraries**
+(INTEGRITY RTOS, Allegro RomPager/RomSShell/SSL, klite crypto, TCP/IP, XML parser) *replaced* by
+Rust crates (embassy/russh/rustls/smoltcp/quick-xml). Only the **iLO application logic** needs RE —
+we have its architecture; detail is done just-in-time per feature.
+
+### ☑ RE'd to a reimplementable level
+- **Hardware / HAL** — register-exact (docs/02-32): SoC, boot/DDR/clock/reset/secure-boot, all 9
+  peripheral drivers, sensors/power/PSU/inventory, CHIF, KVM-video, crypto (=software).
+- **Management services (contract level)** — web+JSON API (33), SSH/SMASH-CLP (34), SNMP (35),
+  IPMI/DCMI (36), RIBCL (37), NVRAM/users/privileges (38), IML/event logs (39).
+
+### ☐ Not yet RE'd — categorized
+
+**A. Standard protocols — build to spec, RE only to catalog enabled options (low RE need):**
+- NTP/SNTP, syslog, SMTP/AlertMail (254 hits) — `docs/41?`
+- Directory / **LDAP** + Kerberos (723) — big feature, but a standard; RE the config/group-role map
+- **SSO** (123), **2FA / smartcard / CAC** (342) — RE the auth flow + where keys/certs live
+- **WS-Man / CIM-SOAP** (11) — minor; likely drop in favour of Redfish
+- **mDNS / SLP / discovery** (7) — standard; reimplement
+
+**B. iLO-proprietary logic — genuinely needs RE (can't build from a spec):**
+- **Fan control algorithm** (57) — the thermal PID/curve. **SAFETY-CRITICAL**: wrong = overheat.
+  Must RE before running on hardware. The control loop is ~`0x118000-0x128000` (docs/25). → `docs/42`
+- **Power-capping / regulator algorithm** (446) — dynamic power, APO. → `docs/43`
+- **FUM** firmware-update flow (88) — component types, flash staging, the signed-component format.
+- **IRC / KVM streaming protocol** (301) — DVC capture→encode→encrypt→stream is mapped (docs/14),
+  but the IRC *client wire protocol* (dvcnet) is not. Only if remote console is a goal.
+- **VSP** virtual-serial-port passthrough (111) — host-serial-over-CHIF specifics.
+- **ERS** Insight Remote Support / phone-home (44) — probably skip for a clean rewrite.
+- **Language packs** (122) — replaced by the new UI's i18n; no RE.
+
+### Priority for a *minimal, safe* BMC
+1. **Fan control algorithm (docs/42)** — safety-critical; do this next.
+2. Power-cap/regulator (docs/43) — needed for power features + to not trip the host.
+3. NTP/syslog/SMTP + LDAP config — standard, straightforward.
+4. Everything else (SSO/2FA/WS-Man/ERS/IRC/VSP) — feature-by-feature, as scope grows.
