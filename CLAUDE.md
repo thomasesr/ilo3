@@ -207,8 +207,7 @@ reusable SoC support: a port needs a new `meta-ilo3` layer + from-scratch Gromit
   block `0x80200000`** (`+0x88` PLL ctrl programmed from strap, `+0x40`=0x400, `+0x58` reset). DDR
   coupling: MEMCFG `0xC0000064` = min(cfg, clock>>1). Outputs = FRQUSB/FRQLPC/FRQMAC. New block
   `0x80200000` added to docs/13 (clock/PLL, != IC1 `0x80F00000`).
-- **Secure boot / sig verify MAPPED** (`docs/31`, boot ROM): image verified by **RSA over a
-  SHA-512 hash** (SHA-512 IV@`0x7f4228`/K-table@`0x7f4268` confirmed; `Starting hash`→`Starting
+- **Secure boot / sig verify MAPPED** (`docs/31`, boot ROM): image verified by **RSA-2048 over a SHA-256 hash** (SHA-256 (HP envelope `Hash: sha256`; combined 256/512 const table @`0x7f4268`); `Starting hash`→`Starting
   decrypt`(RSA)→`Signature valid`/`unsigned - will not boot`). Public key = embedded **cert
   @flash `0x7e0000`** (HP root), sig block @`0x800000`; loader spans iLO3-7. **NVROVR** = NVRAM
   override countdown (recovery window, NOT a sig bypass). **Reflash implication**: boot ROM rejects
@@ -223,11 +222,15 @@ reusable SoC support: a port needs a new `meta-ilo3` layer + from-scratch Gromit
   feature) → **flash boot ROM = top of chain**. **REFLASH VERDICT: FEASIBLE** via SPI programmer —
   patch the sig-check branch or replace boot ROM w/ U-Boot SPL (DDR init docs/30) → unsigned OpenBMC
   boots. (HW-confirm: flash a patched ROM.)
-- **Sig-check branch LOCATED** (`docs/31`): verify fn `0xFFFF3800` = SHA-512(image) → finalize to
+- **Sig-check branch LOCATED** (`docs/31`): verify fn `0xFFFF3800` = SHA-256(image) → finalize to
   `0xA1001EC4` → memcmp 64B vs RSA-decrypted hash (r7) → **`0xFFFF38b8` `cmp r0,#0` / `0xFFFF38bc`
   `bne 0xFFFF39c4`** (bytes `1a000040`). = flash image **`ilo3_194.bin` offset `0x7f38bc`**
   (verified). **PATCH for unsigned boot**: `1a000040`(bne)→`e1a00000`(nop) → always "Signature
   valid" → unsigned OpenBMC boots. Boot ROM not self-checked. For owned EOL G7 HW (project goal).
+- **Sig key/chain IDENTIFIED** (`docs/31`): **RSA-2048**, hash **SHA-256**, signing key `label_HPBBatch`
+  ("HP Binary - Batch" leaf) in an HP "Signed File Fingerprint" envelope @`0x800000`. 3-level chain
+  (leaf ← HP **Printing Device** Infrastructure CA ← self-signed Root CA; certs sha1-RSA-2048). HP
+  reused their printer code-signing PKI. Legit signing needs HP's private key (unavailable) → patch path.
 - **VA→PA RESOLVED** (`docs/10`): the **type-2 images (v0.8.42) ARE the INTEGRITY kernel+BSP**
   (not NIC data) — dense phase-1 ARM, MMU block (TTBR0 `MCR p15,c2` @type2+`0x0aff0c`, SCTLR/
   DACR/TLB), ARM926 **FCSE** (c13) for per-AddressSpace 0-32 MB windows. Kernel hits BOTH

@@ -4,11 +4,11 @@ Date: 2026-10-20. Static RE of the boot ROM (`decompiled/bootrom_7f0000.bin`, ra
 `ARM:LE:32:v5` @ `0x7f0000`). How the boot ROM verifies the firmware image before booting —
 the gating fact for whether alternative (OpenBMC) firmware can be flashed.
 
-## Scheme: RSA signature over a SHA-512 hash
+## Scheme: RSA-2048 signature over a SHA-256 hash
 
 | Element | Finding | Evidence |
 |---------|---------|----------|
-| **Hash** | **SHA-512** | IV table `0x7f4228` (H0 `0x6a09e667`, H1 `…84caa73b`, …) + K table `0x7f4268` = SHA-512 constants as 64-bit pairs (K0 `0x428a2f98d728ae22`, K1 `0x7137449123ef65cd`, K2 `0xb5c0fbcfec4d3b2f`, K3 `0xe9b5dba58189dbbc`) |
+| **Hash** | **SHA-256** | HP's signed-file envelope states `Hash: sha256` (authoritative). The boot ROM constant table `0x7f4268` is a **combined SHA-256/512** table (SHA-256 K[0..3] `0x428a2f98`/`0x71374491`/`0xb5c0fbcf`/`0xe9b5dba5` at even words). *(An earlier read called this SHA-512 — corrected.)* |
 | **Signature** | **RSA** public-key verify ("decrypt" the signature → compare to the hash) | `Starting decrypt`, `Starting hash`, `Signature valid` |
 | **Public key** | in the **embedded certificate** (DER/PEM @ flash `0x7e0000`), chained to an HP **root of trust** — NOT a plain modulus in the boot ROM (entropy scan found no embedded key) | cert block, docs/01/03 |
 | **Signature block** | flash `0x800000` (image signature) | docs/01/03 |
@@ -16,7 +16,7 @@ the gating fact for whether alternative (OpenBMC) firmware can be flashed.
 
 ## Boot flow (docs/03 + this pass)
 
-`locate image → Starting hash (SHA-512) → Starting decrypt (RSA verify signature) →
+`locate image → Starting hash (SHA-256) → Starting decrypt (RSA verify signature) →
 Signature valid → Starting decrypt (image, if encrypted) → Decompressing (LZSS) → Copying image
 → boot`. The loader recognises magics `iLO3iLO4iLO5iLO6iLO7` — the **same verified-boot loader
 spans iLO 3–7**.
@@ -77,7 +77,7 @@ flash programmer can:
 - **patch out** the signature-check branch in the boot ROM, or
 - **replace** the boot ROM with an unsigned first-stage (e.g. a Gromit-XE U-Boot SPL using the
   DDR/clock init in `docs/30`),
-and boot **unsigned OpenBMC** on hardware they own. The RSA/SHA-512 enforcement is a firmware
+and boot **unsigned OpenBMC** on hardware they own. The RSA-2048/SHA-256 enforcement is a firmware
 policy, not a hardware root of trust.
 
 **Caveat (honesty):** this is inferred from (1) the reset vector + full cold-init handler residing
@@ -85,17 +85,50 @@ in flash, (2) the self-referencing `0xFFFF0000` literals, and (3) iLO 3 predatin
 100% certainty needs a hardware test — flash a boot ROM with the check patched and confirm it
 boots (i.e. that no undisclosed mask ROM re-verifies it). All available evidence says it will.
 
+## RSA key size + certificate chain (parsed from the image)
+
+Extracted the embedded certs (PEM @ flash `0x80020f`) + the signature envelope (`0x800000`):
+
+- **Signature envelope** — HP **"Signed File Fingerprint"** ASCII format (two blocks: `0x800000`
+  and `0x801664`):
+  ```
+  --=</Begin HP Signed File Fingerprint\>=--
+  Fingerprint Length: 000527
+  Key: label_HPBBatch
+  Hash: sha256
+  Signature: <base64 RSA-2048 signature, ~256 bytes>
+  ```
+- **RSA key size: 2048-bit** (every cert + the signing key).
+- **Signing hash: SHA-256**, **signing key: `label_HPBBatch`** = the leaf "Hewlett-Packard
+  Binary - Batch" code-signing cert.
+- **Certificate chain** (3 levels, all RSA-2048; the *certs* themselves are `sha1WithRSAEncryption`
+  signed — HP's older CA):
+
+  | Level | Subject CN | Issuer |
+  |-------|-----------|--------|
+  | leaf (code-signing) | **Hewlett-Packard Binary - Batch** | HP Printing Device Infrastructure CA |
+  | intermediate | **Hewlett-Packard Printing Device Infrastructure CA** | HP Printing Device Infrastructure Root CA |
+  | root (self-signed) | **Hewlett-Packard Printing Device Infrastructure Root CA** | (self) |
+
+  (The bundle carries the 3-cert chain **twice** — one per envelope block.) Note HP reused their
+  **printer-firmware code-signing PKI** ("Printing Device Infrastructure") for iLO 3.
+
+**Trust anchor**: the boot ROM verifies the image signature with the `label_HPBBatch` leaf key
+(RSA-2048 / SHA-256); the leaf chains to HP's self-signed Printing-Device Root CA. Signing a
+custom image legitimately needs HP's "Binary - Batch" private key (unavailable) — hence the patch
+path below instead.
+
 ## The signature-check branch — LOCATED (the patch point)
 
 The verify function is at runtime `0xFFFF3800` (boot-ROM file `0x3800`). It:
 
-1. `0xFFFF3860` **SHA-512 init** (`bl 0xFFFF2ca8`, ctx on stack).
-2. `0xFFFF3870` + `0xFFFF388c` **SHA-512 update ×2** (`bl 0xFFFF32ac`) — hashes the image around
+1. `0xFFFF3860` **SHA-256 init** (`bl 0xFFFF2ca8`, ctx on stack).
+2. `0xFFFF3870` + `0xFFFF388c` **SHA-256 update ×2** (`bl 0xFFFF32ac`) — hashes the image around
    the signature region (two ranges, skipping the embedded sig).
-3. `0xFFFF3898` **SHA-512 finalize** (`bl 0xFFFF358c`) → 64-byte digest to buffer `0xA1001EC4`.
+3. `0xFFFF3898` **SHA-256 finalize** (`bl 0xFFFF358c`) → 64-byte digest to buffer `0xA1001EC4`.
 4. `0xFFFF38b4` **compare 0x40 (64) bytes** (`bl 0xFFFF364c`): computed digest (`0xA1001EC4`) vs
    the **RSA-decrypted expected hash** (`r7`, from the earlier "Starting decrypt" RSA op on the
-   signature using the cert key). 64 bytes = SHA-512 digest length.
+   signature using the cert key). 64-byte compare over the RSA-decrypted DigestInfo (SHA-256 hash + PKCS#1 ASN.1 prefix); RSA-2048 key, SHA-256 hash per the HP envelope.
 5. **`0xFFFF38b8`: `cmp r0, #0`** — compare result (0 = digests equal).
 6. **`0xFFFF38bc`: `bne 0xFFFF39c4`  (bytes `1a 00 00 40`)** — **THE decision**. Equal → fall through
    to `0xFFFF38c0` "Signature valid" → boot. Not-equal → `0xFFFF39c4` returns failure → caller

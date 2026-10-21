@@ -27,7 +27,7 @@ flash, executed in place, not inside the compressed payloads.
 ## What the boot ROM is / does
 
 Strings + disassembly identify a signed-image boot loader (`BOOT Version 20150624140241`,
-internal `v 0.1.79+ 25-Jun-2015`). Pipeline: locate image → **validate signature — RSA over a SHA-512 hash** (`Starting
+internal `v 0.1.79+ 25-Jun-2015`). Pipeline: locate image → **validate signature — RSA-2048 over a SHA-256 hash** (`Starting
 hash`, `Signature valid`, `unsigned - will not boot an image`; public key in the embedded cert
 @`0x7e0000`, HP root — see **`docs/31`**) → **decrypt** (`Starting
 decrypt`) → **decompress** (`Decompressing: compressed size … decompressed size …`,
