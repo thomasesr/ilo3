@@ -109,8 +109,9 @@ we have its architecture; detail is done just-in-time per feature.
 - **mDNS / SLP / discovery** (7) — standard; reimplement
 
 **B. iLO-proprietary logic — genuinely needs RE (can't build from a spec):**
-- **Fan control algorithm** (57) — the thermal PID/curve. **SAFETY-CRITICAL**: wrong = overheat.
-  Must RE before running on hardware. The control loop is ~`0x118000-0x128000` (docs/25). → `docs/42`
+- ~~**Fan control algorithm**~~ ☑ **docs/42** — sensor→PWM grouping (SINGLE/FASTEST/AVERAGE), per-PWM
+  Min/Max/Hyst/Blow/Lock; **fail-safe = force MAX on sensor-fault, OS-shutdown on critical**. (NOT PID;
+  PID is power-cap.) Demand curve + SDR thresholds + groupings = board data (RE on HW / SDR dump).
 - **Power-capping / regulator algorithm** (446) — dynamic power, APO. → `docs/43`
 - **FUM** firmware-update flow (88) — component types, flash staging, the signed-component format.
 - **IRC / KVM streaming protocol** (301) — DVC capture→encode→encrypt→stream is mapped (docs/14),
@@ -120,7 +121,7 @@ we have its architecture; detail is done just-in-time per feature.
 - **Language packs** (122) — replaced by the new UI's i18n; no RE.
 
 ### Priority for a *minimal, safe* BMC
-1. **Fan control algorithm (docs/42)** — safety-critical; do this next.
+1. ~~Fan control algorithm (docs/42)~~ ☑ — model done; demand curve/thresholds = board data (HW/SDR).
 2. Power-cap/regulator (docs/43) — needed for power features + to not trip the host.
 3. NTP/syslog/SMTP + LDAP config — standard, straightforward.
 4. Everything else (SSO/2FA/WS-Man/ERS/IRC/VSP) — feature-by-feature, as scope grows.

@@ -46,7 +46,7 @@ threads; keep static RAM small; prefer ChaCha20-Poly1305 (no AES HW); SNTP-seed 
 
 ### Core services / sensors (data paths in `docs/08`,`09`,`20`,`22`-`27`)
 - [ ] Sensor read (temps: PECI + I2C LM75; fans: tach; voltages/VRM)
-- [ ] **Fan control algorithm** — ⚠️ SAFETY-CRITICAL, **RE still needed** (`docs/42` todo)
+- [ ] **Fan control** — ✅ model RE'd (docs/42): grouping (FASTEST default) + **fail-safe force-MAX**; demand curve/thresholds = board data (HW-validate!)
 - [ ] Power control (on/off/reset/NMI/CSM) + state machine — `docs/24`
 - [ ] PSU telemetry (panda SMBus) — `docs/20` · [ ] UID/health LEDs — `docs/08`
 - [ ] Power capping/regulator algorithm — **RE still needed** (`docs/43` todo)
