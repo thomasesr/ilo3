@@ -112,8 +112,11 @@ SSO, 2FA/smartcard, WS-Man, mDNS/SLP): presence+config/modes captured; all build
   StaticLow/StaticHigh) + power-cap PID (the BURN PID over ROM-CHIF → CPU F-stop). iLO=controller,
   BIOS=actuator. (Fan/thermal is the BIOS's, not iLO's — docs/42 corrected.)
 - **FUM** firmware-update flow (88) — component types, flash staging, the signed-component format.
-- **IRC / KVM streaming protocol** (301) — DVC capture→encode→encrypt→stream is mapped (docs/14),
-  but the IRC *client wire protocol* (dvcnet) is not. Only if remote console is a goal.
+- ~~**IRC / KVM streaming protocol**~~ ☑ **docs/45** — P84 wire protocol (dvcnet/p84/irccmd/dvcrcv)
+  mapped: tasks, muxed channels, transport (raw TCP + AES/RC4, port 17990), sessionKey auth,
+  shared-console lock, licensing, clipboard. **Replacement chosen: docs/46** — drop the EOL
+  Java/.NET IRC + P84 socket, adopt **RFB (VNC) + noVNC** over WebSocket/TLS (Hextile encode,
+  software-ARMv5-sized), reusing capture (14)/HID (29)/clipboard (45). Deferred behind core BMC.
 - **VSP** virtual-serial-port passthrough (111) — host-serial-over-CHIF specifics.
 - **ERS** Insight Remote Support / phone-home (44) — probably skip for a clean rewrite.
 - **Language packs** (122) — replaced by the new UI's i18n; no RE.

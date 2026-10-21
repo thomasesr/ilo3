@@ -75,7 +75,8 @@ threads; keep static RAM small; prefer ChaCha20-Poly1305 (no AES HW); SNTP-seed 
 - [ ] CHIF shared-mem server (doorbells, CCB ownership, magic/checksum) — `docs/28`
 - [ ] SMBIOS-over-ROM-CHIF intake — `docs/22`
 - [ ] (optional, heavy) vUSB/UHCI emulation + vMedia — `docs/29`
-- [ ] (optional, heavy) KVM video capture + IRC stream — `docs/14`
+- [ ] (optional, heavy) KVM: **RFB (VNC) server + noVNC** over WebSocket/TLS, Hextile encode,
+      fed by `dvccap` capture — replaces EOL Java/.NET IRC/P84 — `docs/46` (+capture `docs/14`, proto `docs/45`)
 
 ### Firmware update (FUM)
 - [ ] Self-update flow + component inventory + signed-component format — **RE still needed**
