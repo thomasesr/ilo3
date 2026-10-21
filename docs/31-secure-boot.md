@@ -118,6 +118,35 @@ Extracted the embedded certs (PEM @ flash `0x80020f`) + the signature envelope (
 custom image legitimately needs HP's "Binary - Batch" private key (unavailable) — hence the patch
 path below instead.
 
+## Security assessment (is it secure?)
+
+Two separate layers — don't conflate them:
+
+| Layer | Algorithm | Verdict |
+|-------|-----------|---------|
+| **Firmware image signature** (boot ROM enforces) | RSA-2048 / **SHA-256** | **Sound** — no practical forgery without HP's `label_HPBBatch` leaf private key |
+| **Certificate chain signatures** (how HP's CA signed the 3 certs) | RSA-2048 / **SHA-1** (`sha1WithRSAEncryption`, all 3 levels) | **Weak / deprecated** |
+
+- **SHA-1 is broken for collision resistance**: SHAttered (2017), practical **chosen-prefix
+  collisions** (2020, Leurent & Peyrin, ~$45–75k). Public CAs/browsers dropped SHA-1 certs by
+  ~2016; a SHA-1 chain fails any modern audit. In theory a chosen-prefix collision could forge a
+  cert in the chain; in practice it's costly and needs favorable cert structure — low but non-zero.
+- **RSA-2048** is fine (≈112-bit security, no practical break). Exponent 65537.
+- The part that matters for **image integrity** — "can the firmware be tampered with" — is the
+  **SHA-256** image hash, which is sound. The SHA-1 weakness is in the **PKI** (who is trusted to
+  sign), not the image hash.
+- **What the boot ROM actually trusts**: it RSA-verifies the image against the **leaf key**
+  (`label_HPBBatch`). Whether it *also* re-walks the SHA-1 cert chain up to the root at boot, or
+  simply pins/trusts the embedded leaf public key, is **not pinned from the RE**. If it pins the
+  leaf key, the SHA-1 chain weakness never touches boot security (the chain is HP's tooling PKI);
+  either way the image hash is SHA-256.
+
+**Bottom line**: 2008–2010-era crypto — adequate image integrity (RSA-2048/SHA-256) on a
+**deprecated SHA-1 PKI**, **never patched** (EOL). By modern standards the SHA-1 chain is a real
+weakness — a core reason this project exists (OpenBMC brings current crypto/TLS). None of it
+blocks the port: the reflash patch below removes the check entirely, so the signing strength is
+moot for running OpenBMC on owned hardware.
+
 ## The signature-check branch — LOCATED (the patch point)
 
 The verify function is at runtime `0xFFFF3800` (boot-ROM file `0x3800`). It:

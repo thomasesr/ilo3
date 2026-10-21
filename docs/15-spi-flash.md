@@ -45,6 +45,43 @@ write opcode `0x05` → `+0x03`, start (`+0x02 = 1`), wait, read `+0x3E` bit0 = 
   the **host System ROM (BIOS) access** path (iLO can read/flash the server's BIOS over the
   host-interface/CHIF). Keep these distinct; confirm by tracing `romchfservice_c.c`.
 
+## Physical flash chip (for hardware reflashing)
+
+The iLO boot flash is a **25-series SPI NOR**. The firmware **auto-detects the chip by JEDEC ID**
+(RDID `0x9F`), so **HP multi-sourced it — there is no single part number**; the actual chip on a
+given DL360 G7 board depends on the manufacturing batch. Supported manufacturers, from the kernel
+`gxekflsh` JEDEC-ID detect table:
+
+| JEDEC mfr ID | Vendor |
+|--------------|--------|
+| `0x20` | Micron / Numonyx |
+| `0x01` | Spansion / Cypress |
+| `0x1F` | Atmel (Adesto) |
+| `0x1C` | Eon |
+| `0xC8` | GigaDevice |
+| `0x9D` | ISSI |
+
+- **Capacity**: ≥ **8 MB (64 Mbit)** — the image occupies up to `0x800000`, boot ROM at `0x7f0000`
+  (may be a 128 Mbit/16 MB part partially used). Package: typically **SOIC-8** (SOIC-16/WSON if 16 MB).
+- **Voltage**: **not recoverable from firmware** (electrical, not stored). By era/part-class
+  (2010 Gromit-XE, 64–128 Mbit SPI NOR) it is **almost certainly 3.3 V (2.7–3.6 V)** — e.g. Micron
+  M25P64/N25Q064, Spansion S25FL064, Atmel AT25DF641, Eon EN25Q64, GigaDevice GD25Q64. **VERIFY
+  before reflashing** (don't assume): read the chip marking → datasheet, or measure VCC (SOIC-8
+  pin 8 vs GND pin 4) on standby power. Wrong programmer voltage can damage the part; a 1.8 V part
+  would need a level-shifter (CH341A is natively 3.3 V).
+- **Tooling**: CH341A/Dediprog + SOIC-8 clip; `flashrom` identifies the chip over the bus (same
+  RDID the firmware uses) for all six vendors. Dump + back up first, then write the patched image
+  (sig-check NOP at `0x7f38bc`, `docs/31`).
+
+### Two separate flashes — do not confuse
+
+- **iLO boot flash** (this doc) — `gxekflsh` @ `0xC0000200`; vendors above; holds the boot ROM +
+  iLO firmware image. **This is the one to reflash for OpenBMC.**
+- **Host system-ROM / BIOS flash** — `romchf`/`smifpkt` @ `0x01F10000`; the *server's* BIOS chip
+  that iLO reads/flashes. A *wider* detect list (adds Macronix `0xC2`, Winbond `0xEF`, SST `0xBF`,
+  Intel `0x89`) and geometry entries `F3_128Mb_512`/`F3_200Mb_512`/`F3_230Mb_512` belong to this
+  path — NOT the iLO boot flash.
+
 ## For the OpenBMC port
 
 - iLO boot flash → an **SPI-NOR** controller driver for the Gromit-XE SMIF at `0xC0000200`
