@@ -20,8 +20,9 @@ footprint does not fit (see the resource analysis in the chat / PLAN.md).
 
 - **`no_std` Rust** firmware, boots from flash (reuse DDR/clock init `docs/30`, reset `docs/31`).
 - **`embassy`** async executor (DECIDED 2026-10-21, see docs/47 — iLO 3 has no hard-RT
-  requirement; event-driven soft-RT only, so no preemptive RTOS. Reversible "for now";
-  fallback = FreeRTOS-rust/ARM926 if slow-crypto fairness bites). HAL modules = Rust ports of
+  requirement; event-driven soft-RT only, so no preemptive RTOS. Reversible "for now"; upgrade
+  ladder if slow-crypto fairness bites = **RTIC 2** (pure-Rust preemptive, write an ARMv5 backend)
+  → **FreeRTOS-rust**/ARM926 (C kernel, last resort)). HAL modules = Rust ports of
   the 9 drivers already written. Safety (watchdog/thermal fail-safe) = timer ISR above the executor.
 - **`smoltcp`** TCP/IP; **`rustls`** TLS (replaces Allegro/klite — `docs/32`).
 - Workspace layout (proposed): `rebuild/ilo3-rs/` with crates `hal/`, `net/`, `crypto/`,

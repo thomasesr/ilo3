@@ -11,10 +11,23 @@ executor can replace?** Consolidates the OS findings from docs/02/04/10/12.
 **Chosen execution model = `embassy` cooperative async, no preemptive RTOS.** The audit
 below shows no iLO 3 function needs hard real-time, so the determinism argument for an RTOS
 does not apply. embassy is pure Rust, `no_std`, and matches the firmware's event-driven shape.
-Marked **"for now"** — reversible: if slow software-crypto fairness (the one real caveat,
-below) proves painful on hardware, the fallback is **FreeRTOS-rust** (preemptive, ARM926 port)
-or a minimal custom tick-preemptive scheduler. The HAL/services sit above the executor, so a
-later swap is contained.
+Marked **"for now"** — reversible. embassy boots with the least arch glue (fastest to first
+boot). If slow software-crypto fairness (the one real caveat, below) proves painful on hardware,
+the escalation ladder is: **embassy (now) → RTIC 2 → FreeRTOS-rust (last resort)**.
+
+- **RTIC 2** (preferred upgrade) — pure-Rust, preemptive *priority* scheduling built on the
+  interrupt controller (not a kernel); its "hardware-task = ISR at priority, software-task =
+  async executor" model IS this BMC's ISR→work pattern, and preemption fixes the crypto caveat
+  WITHOUT a C kernel. Its async software-task executors are embassy-style, so the async
+  driver/HAL code ports over. **Cost:** no ARMv5/ARM9 backend exists — we would write one
+  (ARMv5 core IRQ/context + the Gromit-XE 2-bank controller, docs/12). HW supports it: per-source
+  enable `+0x14` = source-masking critical sections (guaranteed); `+0x100[32]` config may give
+  true HW priority. Novel/unproven but feasible.
+- **FreeRTOS-rust** (last resort) — preemptive, the jkovacic ARM926 C port exists (least R&D),
+  but puts a C kernel in an otherwise pure-Rust image.
+
+The HAL/services sit above the executor, and RTIC 2 reuses embassy-style async, so a later swap
+is contained.
 
 **Carry-forward risk:** a long-running `rustls` op (RSA/ECDHE, tens–hundreds ms on 250 MHz
 ARMv5) blocks the cooperative executor. Mitigations to design in from the start: keep TLS
