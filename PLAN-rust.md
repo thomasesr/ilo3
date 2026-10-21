@@ -101,12 +101,8 @@ we have its architecture; detail is done just-in-time per feature.
 
 ### ☐ Not yet RE'd — categorized
 
-**A. Standard protocols — build to spec, RE only to catalog enabled options (low RE need):**
-- NTP/SNTP, syslog, SMTP/AlertMail (254 hits) — `docs/41?`
-- Directory / **LDAP** + Kerberos (723) — big feature, but a standard; RE the config/group-role map
-- **SSO** (123), **2FA / smartcard / CAC** (342) — RE the auth flow + where keys/certs live
-- **WS-Man / CIM-SOAP** (11) — minor; likely drop in favour of Redfish
-- **mDNS / SLP / discovery** (7) — standard; reimplement
+**A. Standard protocols** — ☑ **docs/41** (NTP/SNTP, SMTP/AlertMail, syslog, LDAP+Kerberos,
+SSO, 2FA/smartcard, WS-Man, mDNS/SLP): presence+config/modes captured; all build-to-spec.
 
 **B. iLO-proprietary logic — genuinely needs RE (can't build from a spec):**
 - ~~**Fan control algorithm**~~ ☑ **docs/42** — sensor→PWM grouping (SINGLE/FASTEST/AVERAGE), per-PWM
@@ -127,3 +123,13 @@ we have its architecture; detail is done just-in-time per feature.
 2. ~~Power-cap/regulator (docs/43)~~ ☑ — Power Regulator modes + cap PID (ROM-CHIF). Fan=BIOS (docs/42).
 3. NTP/syslog/SMTP + LDAP config — standard, straightforward.
 4. Everything else (SSO/2FA/WS-Man/ERS/IRC/VSP) — feature-by-feature, as scope grows.
+
+### Verdict — is the whole binary RE'd?
+**No, not byte-for-byte — and it doesn't need to be.** Of the 12 MB: web-UI assets + 3rd-party
+libs (RTOS/Allegro/SSL/klite/TCP-IP/XML) + language packs are **replaced wholesale**, not RE'd.
+The **core is fully mapped** — all hardware (register-exact, docs/02-32), every management service
+(contract-level, docs/33-43), and the iLO↔BIOS interface (docs/44). **That is enough to build the
+rewrite.** Remaining gaps are small/scoped: **FUM** self-update (26 hits); **remote-console** wire
+protocols (IRC/vMedia/VSP — only if KVM is in scope, heavy on ARMv5, likely deferred); **blade/OA**
+(309 — out of scope for a DL360 **G7 rack** server); **AHS** format (skip); Kerberos impl (standard).
+RE these just-in-time per feature.
