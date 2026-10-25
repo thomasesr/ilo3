@@ -9,8 +9,13 @@ Two modes:
   observe   mmap the CHIF BAR and hexdump the control header + CCBs — passive, no
             protocol; use this FIRST to confirm iLO is doing CHIF at all (and to
             reverse the real CCB/doorbell convention against drivers/misc/hpilo.c).
-  console   interactive request/response: ping | drain | md <addr> <len> |
-            mw <addr> <u32> | mb <addr> <u8>.
+  console   interactive request/response:
+              ping | drain | id | md <addr> <len> | mw <addr> <u32> | mb <addr> <u8>
+              flash <file> [base] | verify <file> [base] | reboot
+            `flash` reflashes iLO's SPI from the host (no resolder): erase + stream +
+            verify + optional `reboot`. The SPL/boot region (>=0x7f0000) is write-
+            protected in firmware, so a bad reflash of the payload is itself re-
+            flashable from the host; only a nuked SPL needs the SPI programmer.
 
 Run as root. Point --bar at the iLO CHIF function's BAR2 resource, e.g.:
   /sys/bus/pci/devices/0000:02:00.2/resource2   (1 MB window, docs/06)
@@ -38,7 +43,11 @@ DBG_CH = 0xDB90            # debug channel id (matches dbgchif.rs)
 REQ_CCB = 1                # host writes requests here
 REQ_MSG_OFF = 0x8000 + REQ_CCB * 0x4000   # its message region in the window
 
-CMD = {"ping": 1, "drain": 2, "md": 3, "mw": 4, "mb": 5}
+CMD = {"ping": 1, "drain": 2, "md": 3, "mw": 4, "mb": 5,
+       "id": 0x10, "ferase": 0x11, "fwrite": 0x12, "fread": 0x13, "reboot": 0x14}
+
+SPL_BASE = 0x7f0000        # write-protected in firmware (recovery boot)
+CHUNK = 4096               # bytes per fwrite / fread (well under the 16 KB region)
 
 
 def open_bar(path):
@@ -83,14 +92,17 @@ def ring_doorbell(mm):
     pass
 
 
-def request(mm, cmd, addr=0, arg=0, timeout=2.0):
-    # build [cmd u8][addr u32][arg u32] in the request CCB's message region
+def request(mm, cmd, addr=0, arg=0, data=b"", timeout=5.0):
+    # payload = [cmd u8][addr u32][arg u32][data...] ; length field = payload len
     msg = REQ_MSG_OFF
-    put_u16(mm, msg + 0x00, 9)          # per-message length
+    plen = 9 + len(data)
+    put_u16(mm, msg + 0x00, plen)       # per-message payload length
     put_u16(mm, msg + 0x06, DBG_CH)     # channel id
     mm[msg + 0x08] = cmd
     put_u32(mm, msg + 0x09, addr)
     put_u32(mm, msg + 0x0d, arg)
+    if data:
+        mm[msg + 0x11: msg + 0x11 + len(data)] = data
     # global control header: magic + 14-byte sum-to-zero checksum
     mm[DATA_REGION:DATA_REGION + 4] = MAGIC
     chk = (-sum(mm[DATA_REGION:DATA_REGION + 13])) & 0xff
@@ -113,8 +125,53 @@ def request(mm, cmd, addr=0, arg=0, timeout=2.0):
     return None, b""
 
 
+def _clip_to_payload(base, size):
+    # firmware write-protects the SPL/boot region; clip a full-flash image to the
+    # payload so `flash flash.bin` writes only [base, SPL_BASE).
+    if base < SPL_BASE and base + size > SPL_BASE:
+        print(f"note: clipping to payload region [{base:#x}, {SPL_BASE:#x}) "
+              f"(SPL is write-protected; use the SPI programmer for it)")
+        return SPL_BASE - base
+    return size
+
+
+def flash_image(mm, path, base=0):
+    data = open(path, "rb").read()
+    size = _clip_to_payload(base, len(data))
+    data = data[:size]
+    print(f"flash {path}: {size} B @ {base:#x}")
+    st, _ = request(mm, CMD["ferase"], base, size, timeout=60.0)
+    if st != 0:
+        print(f"  erase FAILED status={st}"); return False
+    print("  erased")
+    for off in range(0, size, CHUNK):
+        chunk = data[off:off + CHUNK]
+        st, _ = request(mm, CMD["fwrite"], base + off, len(chunk), chunk)
+        if st != 0:
+            print(f"  write FAILED @ {base+off:#x} status={st}"); return False
+        print(f"\r  wrote {off+len(chunk)}/{size}", end="", flush=True)
+    print()
+    return verify_image(mm, data, base)
+
+
+def verify_image(mm, data, base=0):
+    if isinstance(data, str):
+        data = open(data, "rb").read()
+        data = data[:_clip_to_payload(base, len(data))]
+    for off in range(0, len(data), CHUNK):
+        want = data[off:off + CHUNK]
+        st, got = request(mm, CMD["fread"], base + off, len(want))
+        if st != 0 or got[:len(want)] != want:
+            print(f"  verify MISMATCH @ {base+off:#x} status={st}"); return False
+        print(f"\r  verified {off+len(want)}/{len(data)}", end="", flush=True)
+    print("\n  OK")
+    return True
+
+
 def console(mm):
-    print("iLO3 CHIF debug console. commands: ping | drain | md <a> <n> | mw <a> <v> | mb <a> <v> | quit")
+    print("iLO3 CHIF debug console. commands:")
+    print("  ping | drain | id | md <a> <n> | mw <a> <v> | mb <a> <v>")
+    print("  flash <file> [base_hex] | verify <file> [base_hex] | reboot | quit")
     while True:
         try:
             line = input("chif> ").split()
@@ -125,6 +182,17 @@ def console(mm):
         c = line[0]
         if c == "quit":
             break
+        # multi-step / special commands
+        if c == "flash" and len(line) > 1:
+            flash_image(mm, line[1], int(line[2], 16) if len(line) > 2 else 0)
+            continue
+        if c == "verify" and len(line) > 1:
+            verify_image(mm, line[1], int(line[2], 16) if len(line) > 2 else 0)
+            continue
+        if c == "reboot":
+            request(mm, CMD["reboot"], timeout=1.0)  # no response: iLO jumps
+            print("reboot sent (iLO re-runs flash boot; reconnect after boot)")
+            continue
         if c not in CMD:
             print("?"); continue
         addr = int(line[1], 16) if len(line) > 1 else 0
@@ -132,10 +200,12 @@ def console(mm):
         st, data = request(mm, CMD[c], addr, arg)
         if st is None:
             print("timeout (doorbell/convention not confirmed? try 'observe')")
-        elif c in ("drain",):
+        elif c == "drain":
             sys.stdout.write(data.decode("utf-8", "replace"))
-        elif c == "md":
+        elif c in ("md", "fread"):
             hexbytes(data, addr)
+        elif c == "id":
+            print("JEDEC id: " + " ".join(f"{b:02x}" for b in data))
         else:
             print(f"status={st} data={data!r}")
 

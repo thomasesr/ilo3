@@ -255,3 +255,36 @@ Procedure:
 
 This is the primary bring-up debug path on a board with no JTAG/UART: **passive BAR observe to get
 CHIF up, then host-pull drain + peek/poke for everything after.**
+
+## Reflash from host (no resolder)
+
+Once a working firmware (with the CHIF debug channel) is on the chip via the SPI programmer,
+iterate **without desoldering**: the host streams a new image over CHIF and iLO writes its own SPI
+via the `spinor` driver. Safe because **iLO runs from DDR** (the SPL copied main to `0x20000000`),
+so the flash is not executing while it is erased/rewritten.
+
+Firmware commands (src/dbgchif.rs): `FID` (JEDEC id), `FERASE addr len`, `FWRITE addr len +data`,
+`FREAD addr len`, `REBOOT` (MMU/caches off → jump `0xFFFF0000` = flash reset vector).
+
+Host (tools/ilo3-chif-console.py, `console` mode):
+```
+chif> id                     # confirm the flash controller answers (expect c2 20 17)
+chif> flash flash.bin        # erase + stream + verify the payload region
+chif> reboot                 # iLO re-runs the flash boot → new payload
+```
+
+**Brick-proofing — the SPL/boot region (`>=0x7f0000`) is write-protected in firmware.** `FERASE`/
+`FWRITE` refuse any range touching it (status `ST_PROT`), and the host tool clips a full `flash.bin`
+to `[0, 0x7f0000)`. So:
+- A bad reflash of the **payload** → reboot → SPL (always good) still runs → re-flash from host again.
+- The **SPL** can only be written by the SPI programmer. Keep it stable.
+
+**Remaining gap (follow-on): the early-main brick.** If a flashed payload crashes *before* the CHIF
+debug task spawns, the channel never comes up and the host can't re-flash → back to the programmer.
+To close this, add a **recovery window in the SPL**: after DDR init, before jumping to main, poll
+CHIF for a few seconds for a recovery/flash request (minimal bare-metal CHIF + `spinor` write). Then
+even a dead main is recoverable from the host. Until then: keep the verified backup + the programmer
+as last resort, and prefer reflashing only after a change has reached the debug task at least once.
+
+Clean reset alternative to `reboot`: pull AC / cycle iLO standby power (full reset); the soft-reboot
+just saves the manual step (a true SoC/WDT reset is CONFIRM-ON-HW).

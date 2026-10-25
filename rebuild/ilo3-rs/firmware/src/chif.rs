@@ -125,10 +125,14 @@ impl Chif {
             return None; // bounds guard against a bad offset
         }
         let msg = off; // message region = shmem + offset
-        let len = (shmem_u16(msg) as usize).min(DATA_REGION).min(buf.len());
+        // length @ +0x00 = payload length; channel @ +0x06; payload @ +0x08
+        // (mirror of send()). Copy the PAYLOAD, not the header.
+        let len = (shmem_u16(msg) as usize)
+            .min(DATA_REGION - 8)
+            .min(buf.len());
         let channel = shmem_u16(msg + 0x06);
         for (i, b) in buf[..len].iter_mut().enumerate() {
-            *b = shmem_u8(msg + i);
+            *b = shmem_u8(msg + 0x08 + i);
         }
         Some(RxMsg { channel, ccb, len })
     }
