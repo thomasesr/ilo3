@@ -147,9 +147,12 @@ Phase 2: `0x20=0x2, 0x80200040=0x400` · term `0`. Then MEMCFG `0xC0000064 = str
 
 ## DRAM + SRAM parts identified (2026-10-21, from the board)
 
-- **DRAM = ISSI IS43/46LD16640A** (×16). ISSI "LD" = **LPDDR / mobile DDR** — refines the "DDR3"
-  label used above; confirm the exact generation/density from the ISSI datasheet. The RE'd init
-  table (`0x7f1a0c`) + fn `0x7f198c` are from the firmware and stay authoritative for bring-up;
-  size is MEMCFG-strap-derived (docs/13).
+- **DRAM = ISSI IS43/46LD16640A = 1 Gbit LPDDR2-S4** (×16, 64M×16 = 128 MB/device). This
+  **CORRECTS the "DDR3" label in this doc's title/text** — the fitted part is **LPDDR2-S4**
+  (JEDEC JESD209-2), not DDR3. The firmware's "DDR3 table init" string is a misnomer (HP's generic
+  DDR init path). The RE'd table (`0x7f1a0c`) + fn `0x7f198c` stay authoritative for bring-up, but
+  are the **LPDDR2-S4 init sequence** (power-stable delay → mode-register writes / calibration →
+  MEMCFG), so decode the per-register fields against **JESD209-2**, not the DDR3 spec. Total size
+  1 Gbit/128 MB (MEMCFG-strap-derived, docs/13) — the "32 MB DT placeholder" is just a floor.
 - **Pre-DDR scratch = ISSI IS62WV2568BLL async SRAM** at `0x20000000` — this is why the boot
   ROM / SPL can use stack `0x20004000` before DRAM is trained (docs/13, docs/31 open item resolved).

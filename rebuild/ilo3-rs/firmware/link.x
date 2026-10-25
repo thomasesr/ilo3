@@ -1,13 +1,16 @@
 /* iLO 3 (Gromit-XE, ARM926EJ-S) linker script — Phase 1 bring-up.
  *
  * Physical memory map (docs/13, docs/30):
- *   DDR RAM   0x20000000+   (strap-sized; boot ROM used stack 0x20004000)
+ *   DDR RAM   0x20000000+   (ISSI IS43/46LD16640A = 1 Gbit LPDDR2-S4 = 128 MB, docs/13;
+ *                            strap-sized at runtime; boot ROM used stack 0x20004000 = SRAM)
  *   SPI flash 0xFF800000    (8 MB, XIP, image store — SPL copy is a later phase)
  *   peripherals 0xC0000000 / 0xCEFF0000 / 0x80F00000 / 0x01F0xxxx (MMIO, not here)
  *
  * Phase 1 model: a single flat image linked to RUN FROM DDR (VMA = LMA =
  * 0x20000000), dropped there by an SPL/loader/debugger. Flash-XIP + copy-to-RAM
- * comes with the SPL sub-phase. 16 MB reserved — safe lower bound on DDR size.
+ * comes with the SPL sub-phase. 16 MB reserved — a conservative floor; the part
+ * is 128 MB (1 Gbit LPDDR2-S4), so this can grow once the MEMCFG-enabled size is
+ * confirmed on hardware (gives a far larger heap than today's ~15 MB).
  */
 ENTRY(_start);
 

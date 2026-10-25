@@ -1,4 +1,8 @@
-//! Gromit-XE DDR3 bring-up — verbatim port of boot-ROM fn 0x7f198c (docs/30).
+//! Gromit-XE DRAM bring-up — verbatim port of boot-ROM fn 0x7f198c (docs/30).
+//!
+//! The fitted DRAM is ISSI IS43/46LD16640A = 1 Gbit LPDDR2-S4 (×16, 128 MB;
+//! docs/13) — NOT DDR3, despite the firmware's "DDR3 table" string. The RE'd
+//! (reg,val) table below is the authoritative LPDDR2-S4 init for this part.
 //!
 //! Source: boot ROM init fn 0x7f198c + (reg,val) table 0x7f1a0c, CONFIRMED by
 //! disassembly (capstone) — the PHASE1/PHASE2 arrays below are that table in its
