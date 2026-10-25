@@ -56,6 +56,7 @@ mod ber; // minimal ASN.1 BER codec (SNMP subset; docs/35)
 mod ribcl; // RIBCL XML scripting handler (docs/37)
 mod snmp; // SNMP v1/v2c agent + traps (docs/35)
 mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
+mod chif; // CHIF host-interface transport, BMC side (docs/28)
 mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
 mod nvram; // flash-backed config K-V store (docs/38)

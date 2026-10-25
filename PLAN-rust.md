@@ -201,7 +201,13 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    (VIEW_LOGS-gated). So the event log now populates + is readable at runtime. ☐ SNMP-trap + email
    fan-out from `raise`, more producers (power transitions, health changes).
    ☐ full json/* set (docs/33) + config (nvram) wiring.
-6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
+6. **Host interface** — ⏳ **IN PROGRESS**. ☑ CHIF transport core (`firmware/src/chif.rs`, docs/28):
+   BAR/doorbell registers, shared-mem window (0x40000000, identity-mapped), `CHIF`/`CHI5` magic +
+   14-byte-checksum header validation, per-message length/channel-id header, CCB ownership
+   handshake (bit31), 10 channel descriptors, `poll_rx`/`rx_release`/`send` + host doorbell ring.
+   Transport only; CCB convention/widths = CONFIRM-ON-HW. ☐ channel→service routing (IPMI-over-PCI
+   → `ipmi`, inventory, power), ☐ SMBIOS inventory over ROM-CHIF (docs/22), ☐ host power/state feed.
+   HW-gated (needs host PCI + the kernel-provided window).
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
 
