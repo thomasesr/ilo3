@@ -173,8 +173,13 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    (→ host-power HAL), Get Sensor Reading (→ sensors); ☑ KCS BMC-side state machine
    (`firmware/src/kcs.rs`, IPMI §9) — register offsets at 0x01F0D400 flagged CONFIRM-ON-HW (docs/05
    only locates the block), not spawned yet. ☐ DCMI, SDR/SEL/FRU store, IPMI-over-LAN (RMCP+),
-   HP OEM (OEMHP_*). ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35), ☐ full json/* set (docs/33) +
-   config (nvram) wiring.
+   HP OEM (OEMHP_*).
+   ☑ **event log store** (`firmware/src/eventlog.rs`, docs/39): one coalescing record model, two
+   views (IML hardware / iLO management+actor), circular ring (CAP 256, oldest drops) with duplicate
+   coalescing (bump count+last-seen), ping-pong flash persistence (CRC+seq). `raise()` = the
+   EventBus entry point (SNMP-trap/email hooks later); backs web/IPMI-SEL/RIBCL views. Timestamps =
+   monotonic counter until NTP (docs/18). ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35) (its traps
+   consume `raise`), ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.

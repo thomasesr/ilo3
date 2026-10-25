@@ -133,6 +133,7 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   src/webauth.rs        web session auth: login + bearer sessions + Auth extractor
   src/ipmi.rs           IPMI 2.0 message core + command dispatch (docs/36)
   src/kcs.rs            KCS IPMI transport, BMC-side state machine (docs/36)
+  src/eventlog.rs       coalescing IML + iLO event log store (docs/39)
 spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replacement)
   link-spl.x            flash XIP map (0xFFFF0000, 64K; no .data/.bss pre-DDR)
   build.rs              search path + emits -Tlink-spl.x

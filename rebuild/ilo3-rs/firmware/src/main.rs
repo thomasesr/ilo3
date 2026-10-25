@@ -38,6 +38,7 @@ mod mac; // GXELAN MAC + MDIO (2 NICs; datapath = Phase 3)
 mod mmu; // ARMv5 MMU: identity map + high-vector alias (unblocks live IRQ)
 mod net; // smoltcp TCP/IP stack over the MAC (Phase 3; ring HW-gated)
 mod drives; // drive backplane SEP: UID/presence/health (docs/23)
+mod eventlog; // coalescing IML + iLO event log (docs/39)
 mod fan; // CPLD PWM/tach scan-chain fan control
 mod i2c; // 8-engine I2C/SMBus controller
 mod sensors; // temperature read mechanisms (PECI/LM75; docs/25)
