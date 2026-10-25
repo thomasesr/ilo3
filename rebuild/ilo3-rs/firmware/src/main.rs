@@ -58,6 +58,7 @@ mod smbios; // host SMBIOS inventory over ROM-CHIF (docs/22)
 mod snmp; // SNMP v1/v2c agent + traps (docs/35)
 mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
 mod chif; // CHIF host-interface transport, BMC side (docs/28)
+mod chif_server; // CHIF channel->service routing (docs/28)
 mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
 mod nvram; // flash-backed config K-V store (docs/38)

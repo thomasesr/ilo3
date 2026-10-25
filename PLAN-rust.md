@@ -205,8 +205,10 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    BAR/doorbell registers, shared-mem window (0x40000000, identity-mapped), `CHIF`/`CHI5` magic +
    14-byte-checksum header validation, per-message length/channel-id header, CCB ownership
    handshake (bit31), 10 channel descriptors, `poll_rx`/`rx_release`/`send` + host doorbell ring.
-   Transport only; CCB convention/widths = CONFIRM-ON-HW. ☐ channel→service routing (IPMI-over-PCI
-   → `ipmi`, inventory, power).
+   Transport only; CCB convention/widths = CONFIRM-ON-HW. ☑ channel→service routing
+   (`firmware/src/chif_server.rs`): a task that polls the transport, routes each message by channel
+   (echo + IPMI-over-PCI → `ipmi::dispatch`), and sends the response + rings the host doorbell;
+   channel-id convention = CONFIRM-ON-HW, not spawned (HW-gated).
    ☑ **SMBIOS inventory parser** (`firmware/src/smbios.rs`, docs/22): DMTF SMBIOS record parser
    (header + string-set walker) + type-4 Processor (socket/manufacturer/model/max-speed/cores/
    populated) + type-17 Memory Device (locator/size/speed/type/populated) extractors, plus the
