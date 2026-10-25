@@ -94,7 +94,8 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
      port of the `0x7f1a0c` table (ROM order, byte-verified) + `clock_mode()` self-check (warns if 0)
      + bounded cal-poll (Status::CalTimeout → halt, no infinite spin). HW-confirms: ASIC rev >4 and
      `*0xD1000000 & 3 != 0` (SPL self-checks the latter); full path = CONFIRM-ON-HW via SPI programmer.
-     ☐ hardware validation (board / custom QEMU machine).
+     ☐ hardware validation (board / custom QEMU machine) — **step-by-step runbook: `docs/48`**
+     (SPI-flasher flash + first boot + the full CONFIRM-ON-HW checklist in bring-up order).
 2. **Platform HAL** — ⏳ **IN PROGRESS**. ☑ All 6 register drivers ported to the Rust HAL
    (`firmware/src/`, build-clean, dead-code-eliminated until services consume them):
    `cpld.rs` (bit-addressable CPLD/pwrmicro: UID/PSU/fan-latch, docs/08-09) ·
