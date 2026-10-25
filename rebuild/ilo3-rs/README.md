@@ -119,6 +119,8 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   src/main.rs           reset/startup (IRQ+SVC stacks) + rust_main + embassy tasks
   src/uart.rs           polled console UART HAL
   src/debugsh.rs        bring-up serial debug shell (peek/poke; feature-gated)
+  src/dbglog.rs         debug log ring + tee (host-pull early-boot buffer)
+  src/dbgchif.rs        serial-over-CHIF debug service (host-pull; feature-gated)
   src/atomics.rs        __atomic_* libcall shims (single-core, no LDREX)
   src/critsec.rs        critical-section impl (CPSR IRQ mask, ARMv5)
   src/intc.rs           2-bank irqchip HAL (64 IRQs; docs/12)
@@ -179,6 +181,7 @@ spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replaceme
   src/uart.rs           minimal polled console (banners)
 tools/
   pack-flash.py         assemble the 8 MB flash image (payload + SPL)
+  ilo3-chif-console.py  host CHIF debug console (observe + peek/poke/drain)
 ```
 
 ## Build

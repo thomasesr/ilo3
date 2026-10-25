@@ -225,3 +225,33 @@ console UART now; expose the shell over SSH/VSP only *after* CHIF + networking a
 active, poke candidate registers, confirm against the host `hpilo` driver. **DANGER / production**:
 raw memory access over serial — build `--no-default-features` to exclude the shell from any shipped/
 networked image (verified to compile both ways).
+
+## Serial-over-CHIF debug channel (no JTAG/UART — host-pull)
+
+With no JTAG and no tappable UART, the firmware's debug channel rides **CHIF (pure PCI)**, read
+from the host. Pieces:
+
+- **`src/dbglog.rs`** — a 32 KB RAM **ring buffer** that captures all `main`-onward debug output
+  (boot banners teed via `dbglog::con()`). It is **host-PULL**: because iLO boots before the host,
+  the host connects later and *drains* the ring, so early-boot output is **not missed**. (Pre-DDR/SPL
+  phases, before RAM, still use the flash-breadcrumb.)
+- **`src/dbgchif.rs`** — a CHIF debug service (channel `0xDB90`) with a request/response protocol:
+  `PING`, `DRAIN` (pull the log ring), `MD addr len` (dump memory/MMIO), `MW/MB addr val` (poke).
+  Feature-gated (`debug-shell`); spawned for bring-up.
+- **`tools/ilo3-chif-console.py`** — host side. `observe` mode hexdumps the CHIF BAR (passive —
+  use FIRST to confirm iLO is doing CHIF + to reverse the CCB/doorbell convention vs `hpilo.c`);
+  `console` mode is the interactive `ping / drain / md / mw / mb`.
+
+Procedure:
+1. Flash the firmware; boot iLO + the host OS.
+2. Free the region: `echo 0000:02:00.2 > /sys/bus/pci/drivers/hpilo/unbind`.
+3. `sudo ./tools/ilo3-chif-console.py observe --bar /sys/bus/pci/devices/0000:02:00.2/resource2`
+   → confirm the `CHIF` magic + a produced CCB (iLO's CHIF is alive). This also validates `chif.rs`
+   without any on-iLO console.
+4. Pin the two CONFIRM-ON-HW params from `hpilo.c` + observe output: the **host→iLO doorbell**
+   (`ring_doorbell` in the tool) and the **CCB message-offset convention** (`REQ_MSG_OFF`).
+5. `console` mode → `drain` to read the full early-boot log, `md`/`mw` to probe hardware (e.g. dump
+   the MAC ring registers + descriptor memory to reconstruct the ring, 4.7).
+
+This is the primary bring-up debug path on a board with no JTAG/UART: **passive BAR observe to get
+CHIF up, then host-pull drain + peek/poke for everything after.**

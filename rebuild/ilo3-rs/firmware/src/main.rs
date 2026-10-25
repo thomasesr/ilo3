@@ -23,8 +23,11 @@ use static_cell::StaticCell;
 
 mod atomics; // __atomic_* libcall shims (single-core, no LDREX on ARMv5)
 mod critsec; // critical-section impl (CPSR IRQ mask) — registered via set_impl!
+mod dbglog; // debug log ring + tee writer (host-pull early-boot buffer)
 #[cfg(feature = "debug-shell")]
 mod debugsh; // bring-up serial debug shell (console UART; feature-gated)
+#[cfg(feature = "debug-shell")]
+mod dbgchif; // serial-over-CHIF debug service (host-pull; feature-gated)
 mod intc; // 2-bank Gromit-XE irqchip
 mod ipmi; // IPMI 2.0 message core + dispatch (docs/36)
 mod kcs; // KCS IPMI transport, BMC side (docs/36)
@@ -159,7 +162,9 @@ unsafe fn enable_irqs() {
 
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
-    let mut con = Uart::console();
+    // Tee boot output to the console UART + the debug ring, so the host can drain
+    // the full early-boot log over CHIF later (it boots after iLO; dbglog).
+    let mut con = dbglog::con();
     let _ = writeln!(con, "\n[ilo3-rs] Gromit-XE bring-up — hello from Rust on ARM926EJ-S");
     let _ = writeln!(con, "[ilo3-rs] UART @ 0xC00000F0, RAM @ 0x20000000");
 
@@ -248,6 +253,8 @@ pub extern "C" fn rust_main() -> ! {
         spawner.spawn(thermal::thermal_task().unwrap());
         #[cfg(feature = "debug-shell")]
         spawner.spawn(debugsh::debug_task().unwrap());
+        #[cfg(feature = "debug-shell")]
+        spawner.spawn(dbgchif::dbgchif_task().unwrap());
         spawner.spawn(net::net_task().unwrap());
         spawner.spawn(web::web_task().unwrap());
         spawner.spawn(kvm::kvm_task().unwrap());
