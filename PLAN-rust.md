@@ -178,8 +178,13 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    views (IML hardware / iLO management+actor), circular ring (CAP 256, oldest drops) with duplicate
    coalescing (bump count+last-seen), ping-pong flash persistence (CRC+seq). `raise()` = the
    EventBus entry point (SNMP-trap/email hooks later); backs web/IPMI-SEL/RIBCL views. Timestamps =
-   monotonic counter until NTP (docs/18). ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35) (its traps
-   consume `raise`), ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
+   monotonic counter until NTP (docs/18).
+   ⏳ **SNMP** (docs/35): ☑ ASN.1 BER codec (`firmware/src/ber.rs`, the SNMP subset) + ☑ v1/v2c
+   agent (`firmware/src/snmp.rs`) — community-checked GET/GETNEXT over a MIB (system group +
+   HP/Compaq 1.3.6.1.4.1.232 health OID bound to sensors) + an SNMPv2-Trap builder. Transport-
+   agnostic (`handle(packet)→packet`); UDP listener on smoltcp + trap destinations (3, docs/35) +
+   event→trap mapping are the remaining wiring. ☐ v3/USM, email (SMTP) alert channel.
+   ☐ SSH CLI (docs/34), ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.

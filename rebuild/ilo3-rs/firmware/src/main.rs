@@ -51,6 +51,8 @@ mod x509; // minimal X.509 DER parse + Ed25519 cert/chain verify (mTLS)
 mod tcp; // smoltcp TCP → async embedded-io-async bridge
 mod web; // picoserve HTTPS server (Phase 5)
 mod webauth; // web session auth: login + bearer sessions (docs/38)
+mod ber; // minimal ASN.1 BER codec (SNMP subset; docs/35)
+mod snmp; // SNMP v1/v2c agent + traps (docs/35)
 mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
 mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
