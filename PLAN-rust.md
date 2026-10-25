@@ -236,6 +236,13 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    (WS accept-key, RFB ServerInit, Hextile round-trip + 3 encoder cases, SCSI parse/inquiry/
    capacity, HID reports). Datapaths (MAC ring, CHIF shared-mem, capture registers) remain the
    SPI-programmer/HW bring-up backlog. **Phase 7 code is complete; only HW validation remains.**
+   - **Security review + fixes (2026-10-21)**: ☑ CRITICAL — the KVM listener (:6080) was
+     unauthenticated (server-auth-only TLS + RFB security None + no session check); now the console
+     connection carries the session bearer token in its WS URL (`?token=`), validated via
+     `webauth::privs_for_token` + `REMOTE_CONSOLE` before RFB serves. ☑ usb_msc READ(10) capped at
+     256 blocks (was an unbounded host-controlled alloc → heap OOM DoS). ☑ uhci IN write-back
+     clamped to the TD MaxLen (host-memory integrity); QH element-link read fixed to +4 (QELP). ☑ ws
+     rejects unmasked client frames (RFC 6455); lba arithmetic widened to u64 (overflow).
 
 ## Web server (picoserve) — implementation plan
 

@@ -179,16 +179,20 @@ impl Uhci {
                     };
                     if td.active() {
                         if let Some(data) = on_td(&td) {
-                            host.write(td.buffer, &data);
+                            // Clamp to the TD's MaxLen — never write past the
+                            // host-allocated buffer (host-memory integrity).
+                            let n = data.len().min(td.max_len());
+                            host.write(td.buffer, &data[..n]);
                         }
                         // CONFIRM-ON-HW: write back TD status (clear active, set
                         // actual-length, error bits) to complete the transfer.
                     }
                     ptr = td.link & !0xF;
                 } else {
-                    // QH — follow the element link pointer (offset 4).
+                    // QH — follow the element link pointer (QELP, at QH offset +4,
+                    // not the head link at +0).
                     let mut b = [0u8; 4];
-                    host.read(link & !0xF, &mut b);
+                    host.read((link & !0xF) + 4, &mut b);
                     ptr = u32::from_le_bytes(b) & !0xF;
                 }
                 if ptr == 0 {

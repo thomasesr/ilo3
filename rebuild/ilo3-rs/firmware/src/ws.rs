@@ -87,6 +87,9 @@ async fn read_frame<S: Read>(s: &mut S) -> Result<Frame, WsError> {
     }
     let opcode = hdr[0] & 0x0F;
     let masked = hdr[1] & 0x80 != 0;
+    if !masked {
+        return Err(WsError::Protocol); // RFC 6455 §5.1: client frames MUST be masked
+    }
     let mut len = (hdr[1] & 0x7F) as usize;
     if len == 126 {
         let mut ext = [0u8; 2];
@@ -140,6 +143,19 @@ pub struct WsStream<S: Read + Write> {
     rx: Vec<u8>,
     rx_pos: usize,
     closed: bool,
+    token: Option<String>, // session token from the request URL (?token=...)
+}
+
+/// Extract the `token=` query value from a request line's target (`GET /p?token=X ..`).
+fn request_token(request_line: &str) -> Option<String> {
+    let target = request_line.split(' ').nth(1)?; // the path?query
+    let q = target.split('?').nth(1)?;
+    for kv in q.split('&') {
+        if let Some(v) = kv.strip_prefix("token=") {
+            return Some(v.into());
+        }
+    }
+    None
 }
 
 impl<S: Read + Write> WsStream<S> {
@@ -162,6 +178,7 @@ impl<S: Read + Write> WsStream<S> {
             }
         }
         let text = core::str::from_utf8(&buf).map_err(|_| WsError::Protocol)?;
+        let token = text.lines().next().and_then(request_token);
         let mut key: Option<&str> = None;
         let mut want_binary = false;
         for line in text.split("\r\n") {
@@ -196,7 +213,13 @@ impl<S: Read + Write> WsStream<S> {
         resp.push_str("\r\n");
         inner.write_all(resp.as_bytes()).await.map_err(|_| WsError::Io)?;
 
-        Ok(WsStream { inner, rx: Vec::new(), rx_pos: 0, closed: false })
+        Ok(WsStream { inner, rx: Vec::new(), rx_pos: 0, closed: false, token })
+    }
+
+    /// The session token from the request URL (`?token=`), if any — the KVM path
+    /// authenticates the console connection with it.
+    pub fn token(&self) -> Option<&str> {
+        self.token.as_deref()
     }
 
     /// Send a close frame (graceful shutdown).

@@ -21,6 +21,8 @@ use crate::tcp::{self, TcpStream};
 use crate::tls_handshake::ServerHandshake;
 use crate::tls_stream::TlsStream;
 use crate::uart::Uart;
+use crate::users::Privileges;
+use crate::webauth;
 use crate::ws::WsStream;
 use crate::x509;
 
@@ -84,10 +86,25 @@ pub async fn kvm_task() {
 
         let ok = match TlsStream::handshake(stream, hs).await {
             Ok(tls) => match WsStream::accept(tls).await {
-                Ok(ws) => match RfbSession::handshake(ws, fb, NullInput).await {
-                    Ok(sess) => sess.run().await.is_ok(),
-                    Err(_) => false,
-                },
+                Ok(ws) => {
+                    // Authenticate the console: the session token (which must carry
+                    // REMOTE_CONSOLE) rides the WebSocket URL (?token=...). Server-
+                    // auth-only TLS does NOT authenticate the client, so this check
+                    // is the access boundary for the KVM listener.
+                    let authed = ws
+                        .token()
+                        .and_then(webauth::privs_for_token)
+                        .is_some_and(|p| p.contains(Privileges::REMOTE_CONSOLE));
+                    if !authed {
+                        con.write_bytes(b"[kvm] unauthenticated console attempt - rejected\n");
+                        false
+                    } else {
+                        match RfbSession::handshake(ws, fb, NullInput).await {
+                            Ok(sess) => sess.run().await.is_ok(),
+                            Err(_) => false,
+                        }
+                    }
+                }
                 Err(_) => false,
             },
             Err(_) => false,

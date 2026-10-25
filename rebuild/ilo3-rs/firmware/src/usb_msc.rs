@@ -32,6 +32,9 @@ pub const SCS_FAILED: u8 = 0x01;
 /// CSW status values.
 pub const CSW_OK: u8 = 0x00;
 pub const CSW_FAILED: u8 = 0x01;
+/// Max blocks per READ(10) — caps the response allocation so a hostile host
+/// can't force a multi-MB alloc (nblocks is a 16-bit host field) that OOMs the heap.
+const MAX_XFER_BLOCKS: u32 = 256; // 256 * 512 B = 128 KB
 
 /// A block device backing the virtual mass-storage LUN.
 pub trait BlockDevice {
@@ -160,12 +163,12 @@ fn read_capacity(dev: &mut dyn BlockDevice) -> (u8, Option<Vec<u8>>) {
 
 fn read10(cb: &[u8; 16], dev: &mut dyn BlockDevice) -> (u8, Option<Vec<u8>>) {
     let lba = u32::from_be_bytes([cb[2], cb[3], cb[4], cb[5]]);
-    let nblocks = u16::from_be_bytes([cb[7], cb[8]]) as u32;
+    let nblocks = (u16::from_be_bytes([cb[7], cb[8]]) as u32).min(MAX_XFER_BLOCKS);
     let bs = dev.block_size() as usize;
     let mut out = vec![0u8; (nblocks as usize).saturating_mul(bs)];
     let mut off = 0;
     for i in 0..nblocks {
-        if lba + i >= dev.block_count() {
+        if (lba as u64) + (i as u64) >= dev.block_count() as u64 {
             break;
         }
         let end = (off + bs).min(out.len());
@@ -194,7 +197,7 @@ pub fn write10_data(cb: &[u8; 16], data: &[u8], dev: &mut dyn BlockDevice) -> u8
     }
     let mut off = 0;
     let mut i = 0u32;
-    while off + bs <= data.len() && lba + i < dev.block_count() {
+    while off + bs <= data.len() && (lba as u64) + (i as u64) < dev.block_count() as u64 {
         if !dev.write(lba + i, &data[off..off + bs]) {
             return CSW_FAILED;
         }

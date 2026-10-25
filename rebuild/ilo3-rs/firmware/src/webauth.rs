@@ -224,6 +224,14 @@ pub fn authenticate(user: &str, pass: &str) -> Option<Privileges> {
     critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_success(user))
 }
 
+/// Resolve a bearer token (hex) to its session privileges, or None. Used by the
+/// KVM/console path, which carries the session token in its WebSocket URL rather
+/// than an Authorization header (so a browser applet can connect).
+pub fn privs_for_token(token_hex: &str) -> Option<Privileges> {
+    let bytes = hex_decode_32(token_hex.trim())?;
+    critical_section::with(|cs| SESSIONS.borrow_ref_mut(cs).lookup(&bytes))
+}
+
 /// POST /json/login — Basic creds in, bearer token out. One Argon2 verify.
 pub async fn login(creds: BasicCreds) -> Result<String, StatusCode> {
     let privs = authenticate(&creds.user, &creds.pass).ok_or(StatusCode::UNAUTHORIZED)?;
