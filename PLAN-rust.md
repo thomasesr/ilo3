@@ -214,8 +214,28 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    populated) + type-17 Memory Device (locator/size/speed/type/populated) extractors, plus the
    ROM-CHIF opcode-3 "get record by type" request builder. Parsers are testable now; the fetch
    rides `chif` (HW-gated). ☐ host power/state feed. HW-gated (needs host PCI + the window).
-7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
-   250 MHz ARMv5; defer / may stay unsupported.
+7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — ⏳ **IN PROGRESS**.
+   The docs/46 replacement (RFB/VNC + noVNC, Hextile) is built, clean-room, in three parts:
+   - **7b KVM video** (`firmware/src/`): `ws.rs` WebSocket server framing (RFC 6455, accept-key
+     test-vector validated) · `rfb.rs` RFB 3.8 server state machine (RFC 6143; handshake +
+     SetEncodings/FramebufferUpdate/Key/Pointer/CutText, 16bpp RGB565, Hextile/Raw — ServerInit
+     byte-layout harness-validated) · `hextile.rs` 16x16 tile encoder (Background/Foreground/
+     AnySubrects, Raw fallback; round-trip decode-verified) · `framebuf.rs` dirty-tile framebuffer
+     seam · `kvm.rs` embassy task (TLS→WS→RFB over a 6080 listener) · `novnc.rs` a built-in
+     Raw-encoding browser viewer served at `/html/novnc/vnc.html` (noVNC bundle = pending asset
+     step) · `capture.rs` dvccap HAL scaffold (`0x01F06000` snoop + `0x01F100C0` DVC + `0xB0000000`
+     buffers — CONFIRM-ON-HW).
+   - **7c vUSB/vMedia** (`firmware/src/`): `hid.rs` HID boot-protocol keyboard/mouse + RFB-keysym
+     map (report-verified) · `usb_msc.rs` BOT/SCSI (CBW/CSW + INQUIRY/READ-CAPACITY/READ10/WRITE10/
+     MODE-SENSE — unit-verified) + `BlockDevice` trait · `vmedia.rs` floppy/CD/USB-key image backend
+     (URL fetch = smoltcp stub) · `uhci.rs` UHCI register trap + frame-list/TD/QH walk scaffold
+     (Intel UHCI 1.1) · `vusb.rs` device set + transfer dispatch glue. All HW-gated.
+   - **7a VSP/SOL** (`firmware/src/vsp.rs` + `clp` `vsp`/`textcons` verbs): line-protocol bridge
+     scaffold (LPC COM IRQ 40-42 ↔ TCP 3002) — HW-gated.
+   **Harness** (`rebuild/harness/`, x86_64): `#[path]`-includes the pure modules; 10 tests pass
+   (WS accept-key, RFB ServerInit, Hextile round-trip + 3 encoder cases, SCSI parse/inquiry/
+   capacity, HID reports). Datapaths (MAC ring, CHIF shared-mem, capture registers) remain the
+   SPI-programmer/HW bring-up backlog. **Phase 7 code is complete; only HW validation remains.**
 
 ## Web server (picoserve) — implementation plan
 

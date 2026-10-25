@@ -63,6 +63,19 @@ mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tic
 mod timer; // 64-bit monotonic counter + Wallace clockevent
 mod nvram; // flash-backed config K-V store (docs/38)
 mod users; // local account DB + privileges + argon2 (docs/38)
+mod hextile; // Hextile 16x16 encoder (RFC 6143; Phase 7 KVM)
+mod framebuf; // framebuffer + dirty-tile tracking (Phase 7 KVM seam)
+mod ws; // WebSocket server framing over TLS (RFC 6455; Phase 7 KVM)
+mod rfb; // RFB 3.8 server state machine (RFC 6143; Phase 7 KVM)
+mod capture; // DVC video capture HAL (docs/14; CONFIRM-ON-HW)
+mod kvm; // KVM remote-console task (Phase 7)
+mod novnc; // KVM launch page / built-in viewer (Phase 7)
+mod usb_msc; // USB mass storage: BOT + SCSI block commands (docs/29)
+mod hid; // virtual USB HID keyboard/mouse (docs/29)
+mod vmedia; // virtual media block-device backend (docs/29)
+mod uhci; // virtual UHCI host controller: registers + frame-list walk (docs/29)
+mod vusb; // virtual USB device set: KVM/HID + UHCI dispatch (docs/29)
+mod vsp; // VSP/SOL text console bridge (docs/45)
 mod uart;
 mod vectors; // ARM exception vectors + IRQ dispatch
 use uart::Uart;
@@ -233,6 +246,7 @@ pub extern "C" fn rust_main() -> ! {
         spawner.spawn(thermal::thermal_task().unwrap());
         spawner.spawn(net::net_task().unwrap());
         spawner.spawn(web::web_task().unwrap());
+        spawner.spawn(kvm::kvm_task().unwrap());
     });
 }
 

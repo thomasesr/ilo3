@@ -16,8 +16,8 @@ use core::future::Future;
 
 use embedded_io_async::{ErrorType, Read, Write as _};
 use picoserve::AppBuilder;
-use picoserve::response::StatusCode;
-use picoserve::routing::{get, post};
+use picoserve::response::{File, StatusCode};
+use picoserve::routing::{get, get_service, post};
 use picoserve::time::Timer;
 
 use crate::tcp::{self, TcpStream};
@@ -164,6 +164,7 @@ impl picoserve::AppBuilder for App {
             .route("/json/sessions", get(json_sessions))
             .route("/json/server_event_log", get(json_server_event_log))
             .route("/json/ilo_event_log", get(json_ilo_event_log))
+            .route("/html/novnc/vnc.html", get_service(File::html(crate::novnc::LAUNCH_PAGE)))
     }
 }
 

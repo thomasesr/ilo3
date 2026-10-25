@@ -62,6 +62,7 @@ impl ClpSession {
             "power" => self.power(args.first().copied()),
             "uid" => self.uid(args.first().copied()),
             "nmi" => self.nmi(),
+            "vsp" | "textcons" => self.vsp(),
             _ => format!("error: unknown command '{}'\n", verb),
         }
     }
@@ -192,6 +193,16 @@ impl ClpSession {
         power::nmi();
         "nmi sent\n".to_string()
     }
+
+    /// Enter virtual-serial / text-console passthrough (docs/34). The SSH/TCP
+    /// layer switches to raw streaming after this acknowledgement; the bridge
+    /// itself is `vsp.rs` (HW-gated, docs/45).
+    fn vsp(&self) -> String {
+        if let Err(e) = self.require(Privileges::REMOTE_CONSOLE) {
+            return e;
+        }
+        "entering virtual serial console (VSP/SOL) — transport not yet wired\n".to_string()
+    }
 }
 
 fn power_state_str() -> &'static str {
@@ -203,4 +214,5 @@ fn power_state_str() -> &'static str {
 }
 
 const HELP: &str = "verbs: cd show set reset power uid nmi version help exit\n\
-targets: /map1 (iLO)  /system1 (host)  /lanendpt1\n";
+targets: /map1 (iLO)  /system1 (host)  /lanendpt1\n\
+vsp textcons: virtual-serial / text-console passthrough\n";

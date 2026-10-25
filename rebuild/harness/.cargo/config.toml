@@ -1,0 +1,4 @@
+# Host-side harness (x86_64): pin the host target so `cargo test` never inherits
+# a bare-metal target from a surrounding toolchain/config.
+[build]
+target = "x86_64-unknown-linux-gnu"

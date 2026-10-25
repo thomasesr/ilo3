@@ -1,0 +1,17 @@
+[package]
+name = "ilo3-harness"
+version = "0.0.1"
+edition = "2021"
+description = "Host-side harness: drives the pure Phase 7 firmware modules (Hextile/WS/RFB/SCSI/HID) on x86_64"
+
+# Detach from the parent bare-metal workspace (which pins target=armv5te).
+[workspace]
+
+[dependencies]
+# Match the firmware's async byte-stream traits so ws.rs/rfb.rs compile on host.
+embedded-io = "0.7"
+embedded-io-async = "0.7"
+# WebSocket accept-key hash (ws.rs).
+sha1 = "0.10"
+# Drive the async handshakes to completion without a full runtime.
+futures-lite = "2"

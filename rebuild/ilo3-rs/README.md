@@ -84,12 +84,27 @@ and the PEM/DER flash-backed **cert/key store** (`src/certstore.rs`). What remai
 CertificateVerify, Finished) + **X.509 chain verification** — the large negotiation part, best
 validated against a real TLS client, which needs working networking first.
 
+**Phase 7 (remote console) is built** — the docs/46 replacement, clean-room, all three parts:
+
+- **7b KVM video**: `ws.rs` WebSocket framing (RFC 6455), `rfb.rs` RFB 3.8 server (RFC 6143),
+  `hextile.rs` 16×16 tile encoder, `framebuf.rs` dirty-tile framebuffer seam, `kvm.rs` the
+  TLS→WS→RFB embassy task, `novnc.rs` a built-in browser viewer, `capture.rs` the dvccap HAL
+  scaffold (`docs/14`, CONFIRM-ON-HW).
+- **7c vUSB/vMedia**: `hid.rs` HID keyboard/mouse, `usb_msc.rs` BOT/SCSI + `BlockDevice`,
+  `vmedia.rs` image backend, `uhci.rs` UHCI register trap + frame-list walk, `vusb.rs` dispatch.
+- **7a VSP/SOL**: `vsp.rs` line-protocol bridge scaffold + `vsp`/`textcons` CLI verbs.
+
+A host-side **harness** (`../harness/`, x86_64) `#[path]`-includes the pure modules and runs their
+tests: **10 pass** (WS accept-key vector, RFB ServerInit layout, Hextile round-trip + encoder
+cases, SCSI parse/inquiry/capacity, HID reports). The datapaths stay HW-gated on the same backlog
+below (MAC ring, CHIF shared-mem, capture registers).
+
 Next: the TLS handshake state machine (crypto on its own task so a slow handshake can't stall the
 executor, docs/47), then the management services (IPMI/SSH/SNMP/HTTPS) and the host CHIF interface
 (also unblocks SMBIOS, docs/22). Hardware-validation backlog for the incoming SPI programmer, in
 rough priority: **MAC DMA-ring reconstruction** (unblocks all networking + the TLS E2E test),
 DDR/clock bring-up, the entropy-quality assessment, and the fan/sensor/PSU SDR placeholders +
-CONFIRM-ON-HW items.
+CONFIRM-ON-HW items (incl. capture/UHCI/vMedia from Phase 7).
 
 ## Layout
 
@@ -141,6 +156,19 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   src/snmp.rs           SNMP v1/v2c agent + traps (docs/35)
   src/clp.rs            SMASH CLP command engine for the SSH CLI (docs/34)
   src/ribcl.rs          RIBCL XML scripting handler (docs/37)
+  src/hextile.rs        Hextile 16x16 tile encoder (RFC 6143; Phase 7 KVM)
+  src/framebuf.rs       framebuffer + dirty-tile tracking (Phase 7 KVM seam)
+  src/ws.rs             WebSocket server framing over TLS (RFC 6455; Phase 7 KVM)
+  src/rfb.rs            RFB 3.8 server state machine (RFC 6143; Phase 7 KVM)
+  src/capture.rs        DVC video capture HAL (docs/14; CONFIRM-ON-HW)
+  src/kvm.rs            KVM remote-console task (Phase 7)
+  src/novnc.rs          KVM launch page / built-in viewer (Phase 7)
+  src/usb_msc.rs        USB mass storage: BOT + SCSI block commands (docs/29)
+  src/hid.rs            virtual USB HID keyboard/mouse (docs/29)
+  src/vmedia.rs         virtual media block-device backend (docs/29)
+  src/uhci.rs           virtual UHCI host controller: registers + frame-list walk (docs/29)
+  src/vusb.rs           virtual USB device set: KVM/HID + UHCI dispatch (docs/29)
+  src/vsp.rs            VSP/SOL text console bridge (docs/45)
 spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replacement)
   link-spl.x            flash XIP map (0xFFFF0000, 64K; no .data/.bss pre-DDR)
   build.rs              search path + emits -Tlink-spl.x
@@ -168,6 +196,12 @@ Requires the `nightly` toolchain with `rust-src` + `llvm-tools-preview`
 target is tier-3 (no prebuilt core), so `-Zbuild-std` compiles core/alloc from
 source; `-Zjson-target-spec` enables the `.json` target — both configured in
 `.cargo/config.toml`, no command-line flags needed.
+
+### Host harness (Phase 7 validation)
+
+```sh
+cd ../harness && cargo test   # runs the pure RFB/WS/Hextile/SCSI/HID tests on x86_64
+```
 
 ## Boot model
 
