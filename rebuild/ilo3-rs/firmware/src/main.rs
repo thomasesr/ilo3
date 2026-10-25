@@ -27,6 +27,7 @@ mod intc; // 2-bank Gromit-XE irqchip
 mod ipmi; // IPMI 2.0 message core + dispatch (docs/36)
 mod kcs; // KCS IPMI transport, BMC side (docs/36)
 mod chacha; // ChaCha20 block/permute (CSPRNG core; docs/32)
+mod clp; // SMASH CLP command engine (SSH CLI; docs/34)
 mod cpld; // system CPLD/pwrmicro bit-addressable window (UID/PSU/fan latch)
 mod crypto; // TLS 1.3 crypto primitives + power-on self-test (docs/32)
 mod heap; // global allocator over the DDR heap region

@@ -136,6 +136,7 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   src/eventlog.rs       coalescing IML + iLO event log store (docs/39)
   src/ber.rs            minimal ASN.1 BER codec (SNMP subset; docs/35)
   src/snmp.rs           SNMP v1/v2c agent + traps (docs/35)
+  src/clp.rs            SMASH CLP command engine for the SSH CLI (docs/34)
 spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replacement)
   link-spl.x            flash XIP map (0xFFFF0000, 64K; no .data/.bss pre-DDR)
   build.rs              search path + emits -Tlink-spl.x

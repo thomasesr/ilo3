@@ -184,7 +184,11 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    HP/Compaq 1.3.6.1.4.1.232 health OID bound to sensors) + an SNMPv2-Trap builder. Transport-
    agnostic (`handle(packet)→packet`); UDP listener on smoltcp + trap destinations (3, docs/35) +
    event→trap mapping are the remaining wiring. ☐ v3/USM, email (SMTP) alert channel.
-   ☐ SSH CLI (docs/34), ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
+   ⏳ **SSH CLI** (docs/34): ☑ SMASH CLP command engine (`firmware/src/clp.rs`) — CIM target tree
+   (/map1, /system1, /lanendpt1) with cd/pwd/show/set + HP verbs (power/uid/nmi/version), bound to
+   the HAL (power/cpld/sensors) and privilege-gated; transport-agnostic (`execute(line)→String`).
+   ☐ `russh` SSH-2 transport (modern KEX/ciphers only — no SSH-1/3DES) on smoltcp, pubkey/password
+   auth via the account DB. ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
