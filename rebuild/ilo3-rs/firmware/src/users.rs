@@ -115,6 +115,48 @@ impl UserDb {
         Ok(())
     }
 
+    /// Add an account with a pre-computed PHC hash. Lets the caller run the slow
+    /// Argon2 hash OUTSIDE any lock (never hash while holding a critical section —
+    /// it would mask interrupts for seconds). Err on full DB / duplicate name.
+    pub fn add_hashed(&mut self, name: &str, username: &str, phc: String, privileges: Privileges) -> Result<(), ()> {
+        if self.accounts.len() >= MAX_USERS || self.index_of(name).is_some() {
+            return Err(());
+        }
+        self.accounts.push(Account {
+            name: name.to_string(),
+            username: username.to_string(),
+            phc,
+            privileges,
+            ssh_pubkey: None,
+            fails: 0,
+        });
+        Ok(())
+    }
+
+    /// Clone the stored PHC hash for `name` (fast; do the Argon2 verify outside
+    /// the lock, then call `note_success`/`note_failure`). Honors lockout.
+    pub fn phc_for_login(&self, name: &str) -> Option<String> {
+        let i = self.index_of(name)?;
+        if self.accounts[i].is_locked() {
+            return None;
+        }
+        Some(self.accounts[i].phc.clone())
+    }
+
+    /// Record a successful login (resets failures); returns the privileges.
+    pub fn note_success(&mut self, name: &str) -> Option<Privileges> {
+        let i = self.index_of(name)?;
+        self.accounts[i].fails = 0;
+        Some(self.accounts[i].privileges)
+    }
+
+    /// Record a failed login (increments the lockout counter).
+    pub fn note_failure(&mut self, name: &str) {
+        if let Some(i) = self.index_of(name) {
+            self.accounts[i].fails = self.accounts[i].fails.saturating_add(1);
+        }
+    }
+
     /// Remove an account by login name.
     pub fn remove(&mut self, name: &str) -> bool {
         match self.index_of(name) {

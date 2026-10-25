@@ -47,6 +47,7 @@ mod tls_stream; // TLS 1.3 async stream over an async transport (Phase 5 web)
 mod x509; // minimal X.509 DER parse + Ed25519 cert/chain verify (mTLS)
 mod tcp; // smoltcp TCP → async embedded-io-async bridge
 mod web; // picoserve HTTPS server (Phase 5)
+mod webauth; // web session auth: login + bearer sessions (docs/38)
 mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
 mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
@@ -188,6 +189,11 @@ pub extern "C" fn rust_main() -> ! {
     } else {
         let _ = writeln!(con, "[ilo3-rs] crypto: self-test FAIL — primitives unusable");
     }
+
+    // Web auth: provision the account DB (creates a default Administrator with a
+    // random password, logged once, if empty). Runs one Argon2 hash — slow, but
+    // one-time at boot and before the executor, so nothing is stalled.
+    webauth::init();
 
     // Safety-critical: force fans to MAX before anything else runs — the boot
     // default is cooling-ON, never off (docs/42). The thermal task re-asserts

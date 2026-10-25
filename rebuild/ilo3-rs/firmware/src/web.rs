@@ -16,13 +16,16 @@ use core::future::Future;
 
 use embedded_io_async::{ErrorType, Read, Write as _};
 use picoserve::AppBuilder;
-use picoserve::routing::get;
+use picoserve::response::StatusCode;
+use picoserve::routing::{get, post};
 use picoserve::time::Timer;
 
 use crate::tcp::{self, TcpStream};
 use crate::tls_handshake::ServerHandshake;
 use crate::tls_stream::{TlsStream, TlsStreamError};
 use crate::uart::Uart;
+use crate::users::Privileges;
+use crate::webauth::{self, Auth};
 use crate::{certstore, x509};
 
 /// Trust anchors for optional mTLS client-cert auth. Empty = server-auth only
@@ -44,15 +47,17 @@ impl Timer<WebRuntime> for WebTimer {
 
 // ---- handlers (hand-rolled JSON, wired to the HAL) ----
 
-async fn json_overview() -> String {
+async fn json_overview(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::LOGIN)?;
     let (maj, min) = crate::cpld::version();
-    format!(
+    Ok(format!(
         "{{\"name\":\"ilo3-rs\",\"version\":\"0.0.1\",\"cpld\":\"{}.{}\"}}\n",
         maj, min
-    )
+    ))
 }
 
-async fn json_health_summary() -> String {
+async fn json_health_summary(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::LOGIN)?;
     let mut sensors = String::new();
     for (i, s) in crate::sensors::TABLE.iter().enumerate() {
         if i > 0 {
@@ -77,28 +82,31 @@ async fn json_health_summary() -> String {
             Err(_) => psus.push_str(&format!("{{\"bay\":{},\"present\":{}}}", p.bay, present)),
         }
     }
-    format!("{{\"sensors\":[{}],\"psus\":[{}]}}\n", sensors, psus)
+    Ok(format!("{{\"sensors\":[{}],\"psus\":[{}]}}\n", sensors, psus))
 }
 
-async fn json_host_power() -> String {
+async fn json_host_power(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::LOGIN)?;
     let state = match crate::power::state() {
         crate::power::State::On => "on",
         crate::power::State::Off => "off",
         crate::power::State::InReset => "in_reset",
     };
-    format!("{{\"state\":\"{}\"}}\n", state)
+    Ok(format!("{{\"state\":\"{}\"}}\n", state))
 }
 
-async fn json_network() -> String {
+async fn json_network(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::LOGIN)?;
     let m = crate::net::MAC_ADDR;
-    format!(
+    Ok(format!(
         "{{\"mac\":\"{:02x}:{:02x}:{:02x}:{:02x}:{:02x}:{:02x}\"}}\n",
         m[0], m[1], m[2], m[3], m[4], m[5]
-    )
+    ))
 }
 
-async fn json_sessions() -> &'static str {
-    "{\"sessions\":[]}\n"
+async fn json_sessions(auth: Auth) -> Result<&'static str, StatusCode> {
+    auth.require(Privileges::LOGIN)?;
+    Ok("{\"sessions\":[]}\n")
 }
 
 /// The router app (built once; `impl Trait` in assoc type needs nightly).
@@ -109,6 +117,8 @@ impl picoserve::AppBuilder for App {
 
     fn build_app(self) -> picoserve::Router<Self::PathRouter> {
         picoserve::Router::new()
+            .route("/json/login", post(webauth::login))
+            .route("/json/logout", post(webauth::logout))
             .route("/json/overview", get(json_overview))
             .route("/json/health_summary", get(json_health_summary))
             .route("/json/host_power", get(json_host_power))

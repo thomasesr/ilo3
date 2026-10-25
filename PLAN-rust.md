@@ -161,9 +161,14 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    bitflags (6 core + 7 extended), login lockout. ☑ **NVRAM config K-V store** (`firmware/src/
    nvram.rs`, docs/38): named keys + per-key privilege mask, ping-pong wear-leveled across two
    64 KB flash blocks with a seq number + CRC (atomic: a mid-write power loss falls back to the
-   prior block). Both build-clean, flash I/O = CONFIRM-ON-HW. ☐ wire auth/config into the services.
-   ☐ IPMI (KCS, docs/36), ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35), HTTPS UI = **picoserve**
-   (`web.rs`, scaffolded; see the dedicated plan below) — flesh out the json/* endpoints (docs/33).
+   prior block). Both build-clean, flash I/O = CONFIRM-ON-HW.
+   ☑ **web auth wired** (`firmware/src/webauth.rs`): session-based login — `POST /json/login` takes
+   HTTP Basic creds, runs ONE Argon2 verify (outside any lock — hashing never holds a critical
+   section), issues a random 256-bit bearer token (30-min TTL). An `Auth` extractor validates
+   `Authorization: Bearer <token>` on every `json/*` endpoint and enforces `Privileges`; `logout`
+   invalidates the token. A default `Administrator` (random password, logged once) is provisioned at
+   boot if the DB is empty. ☐ IPMI (KCS, docs/36), ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35),
+   ☐ flesh out the full json/* endpoint set (docs/33) + config (nvram) wiring.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
