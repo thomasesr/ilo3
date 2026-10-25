@@ -203,18 +203,22 @@ impl<'r, S> FromRequestParts<'r, S> for BasicCreds {
 
 // ---- handlers ----
 
+/// Authenticate a username/password against the account DB, returning the
+/// privileges on success. The slow Argon2 verify runs OUTSIDE any lock; only the
+/// hash fetch + failure/success bookkeeping are under tiny critical sections.
+/// Shared by the web login and RIBCL (each RIBCL request carries a LOGIN).
+pub fn authenticate(user: &str, pass: &str) -> Option<Privileges> {
+    let phc = critical_section::with(|cs| USERS.borrow_ref_mut(cs).phc_for_login(user))?;
+    if !users::verify_password(pass.as_bytes(), &phc) {
+        critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_failure(user));
+        return None;
+    }
+    critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_success(user))
+}
+
 /// POST /json/login — Basic creds in, bearer token out. One Argon2 verify.
 pub async fn login(creds: BasicCreds) -> Result<String, StatusCode> {
-    // tiny locked lookup: get the stored hash (honors lockout)
-    let phc = critical_section::with(|cs| USERS.borrow_ref_mut(cs).phc_for_login(&creds.user));
-    let Some(phc) = phc else { return Err(StatusCode::UNAUTHORIZED) };
-    // slow verify OUTSIDE the lock
-    if !users::verify_password(creds.pass.as_bytes(), &phc) {
-        critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_failure(&creds.user));
-        return Err(StatusCode::UNAUTHORIZED);
-    }
-    let privs = critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_success(&creds.user))
-        .ok_or(StatusCode::UNAUTHORIZED)?;
+    let privs = authenticate(&creds.user, &creds.pass).ok_or(StatusCode::UNAUTHORIZED)?;
     // token bytes generated OUTSIDE the SESSIONS lock
     let mut token = [0u8; 32];
     rng::fill_bytes(&mut token);

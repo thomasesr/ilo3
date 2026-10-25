@@ -188,7 +188,14 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    (/map1, /system1, /lanendpt1) with cd/pwd/show/set + HP verbs (power/uid/nmi/version), bound to
    the HAL (power/cpld/sensors) and privilege-gated; transport-agnostic (`execute(line)→String`).
    ☐ `russh` SSH-2 transport (modern KEX/ciphers only — no SSH-1/3DES) on smoltcp, pubkey/password
-   auth via the account DB. ☐ full json/* set (docs/33) + config (nvram) wiring + EventBus fan-out.
+   auth via the account DB.
+   ☑ **RIBCL** (`firmware/src/ribcl.rs`, docs/37): compact XML tokenizer + dispatcher — parses the
+   `<RIBCL><LOGIN><X_INFO MODE><CMD/>` envelope, authenticates each request via `webauth::
+   authenticate` (shared lock-safe auth, also used by web login), runs a privilege-gated command
+   subset (GET_FW_VERSION, GET_EMBEDDED_HEALTH, SET_HOST_POWER, PRESS_PWR_BTN, COLD_BOOT_SERVER,
+   CLEAR_IML/CLEAR_EVENTLOG) bound to the HAL/eventlog, and returns `<RESPONSE STATUS=...>`.
+   ☐ the full ~180-command set + XML port transport. ☐ full json/* set (docs/33) + config (nvram)
+   wiring + EventBus fan-out.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
