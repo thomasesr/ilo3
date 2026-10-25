@@ -118,6 +118,7 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   build.rs              search path + emits -Tlink.x
   src/main.rs           reset/startup (IRQ+SVC stacks) + rust_main + embassy tasks
   src/uart.rs           polled console UART HAL
+  src/debugsh.rs        bring-up serial debug shell (peek/poke; feature-gated)
   src/atomics.rs        __atomic_* libcall shims (single-core, no LDREX)
   src/critsec.rs        critical-section impl (CPSR IRQ mask, ARMv5)
   src/intc.rs           2-bank irqchip HAL (64 IRQs; docs/12)

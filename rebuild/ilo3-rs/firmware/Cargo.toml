@@ -10,6 +10,13 @@ path = "src/main.rs"
 test = false
 bench = false
 
+[features]
+# Bring-up serial debug shell (raw peek/poke over the console UART). Default-on
+# for bring-up; build with --no-default-features to exclude it from production
+# (it must never be enabled on a networked/exposed path — see src/debugsh.rs).
+default = ["debug-shell"]
+debug-shell = []
+
 [dependencies]
 # Single-core critical section via CPSR IRQ masking (ARMv5 has no LDREX, so
 # core::sync::atomic + embassy-sync route through this). Impl in src/critsec.rs.

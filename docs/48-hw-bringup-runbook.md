@@ -201,3 +201,27 @@ committing to flash. The SPL path (flash) is only needed for an unattended power
 **UART tap → DDR/clock boots → counter rate → MMU/IRQ live → thermal fail-safe → MAC DMA ring
 (unblocks all networking) → entropy assessment → host CHIF/KCS.** The MAC ring is the single biggest
 unblocker; the thermal fail-safe is the single most safety-critical to verify.
+
+## Interactive debugging — the serial debug shell
+
+The firmware ships a **serial debug shell** on the console UART (`src/debugsh.rs`, the `debug-shell`
+cargo feature, **default-on** for bring-up). It depends on nothing HW-gated — just the polled UART —
+so it is the interactive bring-up console over the same serial tap as Phase 3. Commands:
+
+```
+md <addr> [len]   dump memory/MMIO (hex+ascii)   mw <addr> <u32>   write word (poke)
+mb <addr> <u8>    write byte                      id   flash JEDEC (RDID)
+temp              sensor reads                     power  host power state
+log               IML event log                    help
+```
+
+Why this, not VSP: **VSP (the iLO virtual serial port) cannot be the bring-up debug channel** — it
+bridges the *host's* serial over CHIF + the network, both of which are HW-gated (the very things
+being brought up), and it carries the host OS console, not iLO's own debug output. Use the physical
+console UART now; expose the shell over SSH/VSP only *after* CHIF + networking are validated.
+
+`md`/`mw` are raw peek/poke over all address space — this is how you probe registers by hand and
+**reconstruct the MAC DMA ring** (4.7): dump the MAC block + the descriptor memory while the ring is
+active, poke candidate registers, confirm against the host `hpilo` driver. **DANGER / production**:
+raw memory access over serial — build `--no-default-features` to exclude the shell from any shipped/
+networked image (verified to compile both ways).

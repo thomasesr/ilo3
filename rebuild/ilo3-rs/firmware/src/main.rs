@@ -23,6 +23,8 @@ use static_cell::StaticCell;
 
 mod atomics; // __atomic_* libcall shims (single-core, no LDREX on ARMv5)
 mod critsec; // critical-section impl (CPSR IRQ mask) — registered via set_impl!
+#[cfg(feature = "debug-shell")]
+mod debugsh; // bring-up serial debug shell (console UART; feature-gated)
 mod intc; // 2-bank Gromit-XE irqchip
 mod ipmi; // IPMI 2.0 message core + dispatch (docs/36)
 mod kcs; // KCS IPMI transport, BMC side (docs/36)
@@ -244,6 +246,8 @@ pub extern "C" fn rust_main() -> ! {
         spawner.spawn(heartbeat().unwrap());
         spawner.spawn(ticker().unwrap());
         spawner.spawn(thermal::thermal_task().unwrap());
+        #[cfg(feature = "debug-shell")]
+        spawner.spawn(debugsh::debug_task().unwrap());
         spawner.spawn(net::net_task().unwrap());
         spawner.spawn(web::web_task().unwrap());
         spawner.spawn(kvm::kvm_task().unwrap());
