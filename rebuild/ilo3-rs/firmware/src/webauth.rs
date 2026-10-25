@@ -211,6 +211,14 @@ pub fn authenticate(user: &str, pass: &str) -> Option<Privileges> {
     let phc = critical_section::with(|cs| USERS.borrow_ref_mut(cs).phc_for_login(user))?;
     if !users::verify_password(pass.as_bytes(), &phc) {
         critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_failure(user));
+        crate::eventlog::raise(
+            crate::eventlog::LogKind::Ilo,
+            crate::eventlog::Severity::Caution,
+            crate::eventlog::class::SECURITY,
+            crate::eventlog::code::LOGIN_FAIL,
+            "failed login attempt",
+            Some(user),
+        );
         return None;
     }
     critical_section::with(|cs| USERS.borrow_ref_mut(cs).note_success(user))

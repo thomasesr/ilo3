@@ -21,6 +21,7 @@ use core::fmt::Write;
 
 use embassy_time::{Duration, Timer};
 
+use crate::eventlog::{self, LogKind, Severity};
 use crate::sensors::{self, Celsius};
 use crate::uart::Uart;
 use crate::{fan, power, rng};
@@ -135,6 +136,14 @@ pub async fn thermal_task() {
                 }
                 Err(_) => {
                     let _ = writeln!(con, "[thermal] sensor {} READ FAIL -> zone MAX", s.name);
+                    eventlog::raise(
+                        LogKind::Iml,
+                        Severity::Caution,
+                        eventlog::class::THERMAL,
+                        eventlog::code::SENSOR_FAIL,
+                        "temperature sensor read failure — fans forced to maximum",
+                        None,
+                    );
                 }
             }
         }
@@ -142,6 +151,14 @@ pub async fn thermal_task() {
         // Critical temperature: log + graceful host shutdown (once), keep fans max.
         if critical && !crit_handled {
             let _ = writeln!(con, "[thermal] CRITICAL temp -> host graceful shutdown");
+            eventlog::raise(
+                LogKind::Iml,
+                Severity::Critical,
+                eventlog::class::THERMAL,
+                eventlog::code::CRITICAL_TEMP,
+                "critical temperature threshold exceeded — automatic OS shutdown",
+                None,
+            );
             init_failsafe();
             power::graceful_shutdown();
             crit_handled = true;

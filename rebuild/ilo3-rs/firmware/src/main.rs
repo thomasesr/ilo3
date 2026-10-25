@@ -208,6 +208,15 @@ pub extern "C" fn rust_main() -> ! {
     thermal::init_failsafe();
     let _ = writeln!(con, "[ilo3-rs] thermal: boot fail-safe — fans MAX");
 
+    eventlog::raise(
+        eventlog::LogKind::Iml,
+        eventlog::Severity::Informational,
+        eventlog::class::BOOT,
+        eventlog::code::BOOT_COMPLETE,
+        "iLO3-rs firmware boot complete",
+        None,
+    );
+
     let _ = writeln!(con, "[ilo3-rs] starting embassy executor (platform-spin)...");
 
     // Shared smoltcp socket set — used by both net_task (poll) and web_task.

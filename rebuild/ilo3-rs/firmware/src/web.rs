@@ -23,6 +23,7 @@ use picoserve::time::Timer;
 use crate::tcp::{self, TcpStream};
 use crate::tls_handshake::ServerHandshake;
 use crate::tls_stream::{TlsStream, TlsStreamError};
+use crate::eventlog::{self, LogKind, Severity};
 use crate::uart::Uart;
 use crate::users::Privileges;
 use crate::webauth::{self, Auth};
@@ -109,6 +110,43 @@ async fn json_sessions(auth: Auth) -> Result<&'static str, StatusCode> {
     Ok("{\"sessions\":[]}\n")
 }
 
+fn sev_str(s: Severity) -> &'static str {
+    match s {
+        Severity::Informational => "informational",
+        Severity::Caution => "caution",
+        Severity::Critical => "critical",
+        Severity::Repaired => "repaired",
+        Severity::Corrected => "corrected",
+        Severity::Uncorrectable => "uncorrectable",
+    }
+}
+
+fn render_log(kind: LogKind) -> String {
+    let recs = eventlog::snapshot(kind);
+    let mut s = String::from("{\"events\":[");
+    for (i, r) in recs.iter().enumerate() {
+        if i > 0 {
+            s.push(',');
+        }
+        s.push_str(&format!(
+            "{{\"number\":{},\"severity\":\"{}\",\"class\":{},\"code\":{},\"count\":{},\"first\":{},\"last\":{},\"desc\":\"{}\"}}",
+            r.number, sev_str(r.severity), r.class, r.code, r.count, r.first_ts, r.last_ts, r.desc
+        ));
+    }
+    s.push_str("]}\n");
+    s
+}
+
+async fn json_server_event_log(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::VIEW_LOGS)?;
+    Ok(render_log(LogKind::Iml))
+}
+
+async fn json_ilo_event_log(auth: Auth) -> Result<String, StatusCode> {
+    auth.require(Privileges::VIEW_LOGS)?;
+    Ok(render_log(LogKind::Ilo))
+}
+
 /// The router app (built once; `impl Trait` in assoc type needs nightly).
 struct App;
 
@@ -124,6 +162,8 @@ impl picoserve::AppBuilder for App {
             .route("/json/host_power", get(json_host_power))
             .route("/json/network", get(json_network))
             .route("/json/sessions", get(json_sessions))
+            .route("/json/server_event_log", get(json_server_event_log))
+            .route("/json/ilo_event_log", get(json_ilo_event_log))
     }
 }
 

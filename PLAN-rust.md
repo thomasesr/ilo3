@@ -194,8 +194,13 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    authenticate` (shared lock-safe auth, also used by web login), runs a privilege-gated command
    subset (GET_FW_VERSION, GET_EMBEDDED_HEALTH, SET_HOST_POWER, PRESS_PWR_BTN, COLD_BOOT_SERVER,
    CLEAR_IML/CLEAR_EVENTLOG) bound to the HAL/eventlog, and returns `<RESPONSE STATUS=...>`.
-   ☐ the full ~180-command set + XML port transport. ☐ full json/* set (docs/33) + config (nvram)
-   wiring + EventBus fan-out.
+   ☐ the full ~180-command set + XML port transport.
+   ⏳ **EventBus wiring**: ☑ producers — the live thermal task raises IML events on sensor-fault /
+   critical-temp, web login-fail raises an iLO security event, boot raises BOOT_COMPLETE (coalescing
+   dedups repeats); ☑ consumer — web `json/server_event_log` + `json/ilo_event_log` render the store
+   (VIEW_LOGS-gated). So the event log now populates + is readable at runtime. ☐ SNMP-trap + email
+   fan-out from `raise`, more producers (power transitions, health changes).
+   ☐ full json/* set (docs/33) + config (nvram) wiring.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.

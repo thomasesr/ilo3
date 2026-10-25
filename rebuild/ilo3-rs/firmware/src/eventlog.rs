@@ -26,6 +26,23 @@ const LOG_B: u32 = 0x006B_0000;
 const BLOCK_SIZE: usize = 0x1_0000;
 const MAGIC: u32 = 0x474C_5847; // "GXLG"
 
+/// Event class/code constants (the EventBus taxonomy; maps toward the HP IML
+/// catalog, docs/39). Kept compact; extend as producers are wired in.
+pub mod class {
+    pub const THERMAL: u16 = 0x0001;
+    pub const POWER: u16 = 0x0002;
+    pub const BOOT: u16 = 0x0003;
+    pub const SECURITY: u16 = 0x0004;
+}
+pub mod code {
+    pub const CRITICAL_TEMP: u16 = 0x0001;
+    pub const SENSOR_FAIL: u16 = 0x0002;
+    pub const BOOT_COMPLETE: u16 = 0x0001;
+    pub const POWER_ON: u16 = 0x0001;
+    pub const POWER_OFF: u16 = 0x0002;
+    pub const LOGIN_FAIL: u16 = 0x0001;
+}
+
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Severity {
     Informational,
