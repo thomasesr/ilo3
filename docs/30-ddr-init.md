@@ -144,3 +144,12 @@ Phase 2: `0x20=0x2, 0x80200040=0x400` · term `0`. Then MEMCFG `0xC0000064 = str
 ### Remaining HW-confirms
 - ASIC rev of the fitted GXE (selects rev>4 vs rev≤4 timing set). docs/30 assumes rev>4.
 - `0xD1000000 & 3 != 0` on the board (selects table-walk, no-PLL path). SPL self-checks.
+
+## DRAM + SRAM parts identified (2026-10-21, from the board)
+
+- **DRAM = ISSI IS43/46LD16640A** (×16). ISSI "LD" = **LPDDR / mobile DDR** — refines the "DDR3"
+  label used above; confirm the exact generation/density from the ISSI datasheet. The RE'd init
+  table (`0x7f1a0c`) + fn `0x7f198c` are from the firmware and stay authoritative for bring-up;
+  size is MEMCFG-strap-derived (docs/13).
+- **Pre-DDR scratch = ISSI IS62WV2568BLL async SRAM** at `0x20000000` — this is why the boot
+  ROM / SPL can use stack `0x20004000` before DRAM is trained (docs/13, docs/31 open item resolved).

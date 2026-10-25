@@ -46,3 +46,17 @@ Contains per-process code/data **and** the memory-mapped peripheral window:
 - **`0x80200000`** = Gromit-XE **clock/PLL/reset controller** (boot ROM, docs/30): `+0x88` PLL
   ctrl, `+0x40`/`+0x58` reset/config. Strap-select register at `0x801F00A4`. Distinct from IC1
   (`0x80F00000`).
+
+## Physical memory parts — CONFIRMED from the board (2026-10-21)
+
+The fitted DL380p G7 iLO 3 memory devices, read off the chips:
+
+| Role | Part | Notes |
+|------|------|-------|
+| **Boot ROM / SPI NOR** | **Macronix MX25L6455E** | 64 Mbit = **8 MB**, 3 V SPI NOR. Confirms the 8 MB flash (docs/01/03/15/17). JEDEC RDID = `C2 20 17`. Supports 4 KB sector (0x20) + 64 KB block (0xD8) erase → `spinor::{read_id, erase_4k, erase_64k}`. Mapped `0xFF800000-0xFFFFFFFF`; boot ROM/SPL at `0x7F0000`=`0xFFFF0000`. |
+| **SRAM** | **ISSI IS62WV2568BLL-45** (async, 45 ns, low-power) | Small async SRAM at the low window (`0x20000000`). **This is the pre-DDR scratch RAM** — it resolves the docs/31 open question "how does the reset handler use stack `0x20004000` before DDR is trained": that address is **SRAM**, live at reset, no init needed. The SPL (`spl/src/main.rs`) scratch stack + the boot ROM both use it until DDR is up; after DDR init the controller presents DRAM at `0x20000000` (SRAM is the low-order alias / bootstrap tier). |
+| **DRAM** | **ISSI IS43/46LD16640A** (×16) | The main DRAM. ISSI "**LD**" family = **LPDDR / mobile DDR**, which **refines docs/30's "DDR3" label** — confirm the exact generation + density from the ISSI datasheet. The boot-ROM init values (docs/30, fn `0x7f198c` / table `0x7f1a0c`) are RE'd from the firmware and remain authoritative for bring-up regardless of the generation name; total DRAM size is MEMCFG-strap-derived at runtime (docs/30), consistent with the ~60 MB usable figure (likely 2× these parts). |
+
+Implication for the SPL: the `0x20004000` scratch stack is **real SRAM**, so the SPL's pre-DDR
+phase is on solid ground (no reliance on "warm"/partially-trained DRAM). The DDR init in
+`spl/src/ddr.rs` brings up the IS43/46LD16640A per the RE'd table.

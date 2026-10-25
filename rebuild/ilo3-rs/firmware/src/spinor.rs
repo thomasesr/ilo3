@@ -46,7 +46,14 @@ const OP_RDSR: u8 = 0x05;
 const OP_WREN: u8 = 0x06;
 const OP_READ: u8 = 0x03;
 const OP_PP: u8 = 0x02;
-const OP_ERASE64K: u8 = 0xD8;
+const OP_ERASE4K: u8 = 0x20; // sector erase (4 KB)
+const OP_ERASE64K: u8 = 0xD8; // block erase (64 KB)
+const OP_RDID: u8 = 0x9F; // JEDEC read-ID
+
+/// Fitted part: Macronix MX25L6455E, 64 Mbit (8 MB) SPI NOR (confirmed from the
+/// board). JEDEC RDID = mfr 0xC2 (Macronix), type 0x20 (MX25L), capacity 0x17.
+pub const JEDEC_MX25L6455E: [u8; 3] = [0xC2, 0x20, 0x17];
+pub const FLASH_SIZE: u32 = 8 * 1024 * 1024;
 
 const POLL_MAX: u32 = 2_000_000; // bounded spin guard
 
@@ -161,4 +168,20 @@ pub fn erase_64k(addr: u32) -> Result<(), Error> {
     write_enable()?;
     xfer(OP_ERASE64K, Some(addr & !0xFFFF), &[], &mut [], GO_CMD)?;
     wait_wip()
+}
+
+/// Erase the 4 KB sector containing `addr` (opcode 0x20) — MX25L6455E supports
+/// fine-grained erase, better for the small NVRAM/cert/log regions than 64 KB.
+pub fn erase_4k(addr: u32) -> Result<(), Error> {
+    write_enable()?;
+    xfer(OP_ERASE4K, Some(addr & !0xFFF), &[], &mut [], GO_CMD)?;
+    wait_wip()
+}
+
+/// Read the JEDEC ID (RDID 0x9F) → [manufacturer, type, capacity]. Compare to
+/// `JEDEC_MX25L6455E` to confirm the fitted flash before any erase/program.
+pub fn read_id() -> Result<[u8; 3], Error> {
+    let mut id = [0u8; 3];
+    xfer(OP_RDID, None, &[], &mut id, GO_STATUS)?;
+    Ok(id)
 }

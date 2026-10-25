@@ -7,8 +7,9 @@
 //!
 //! Pre-DDR discipline (see link-spl.x): no .data/.bss, no statics, no heap — only
 //! .text/.rodata in flash + a scratch stack at 0x20004000 (the address HP's boot
-//! ROM uses at reset). After DDR is up the stack is raised into high DRAM before
-//! the image copy, which targets the low DRAM the scratch stack sat near.
+//! ROM uses at reset — this is ISSI IS62WV2568BLL async SRAM, live at reset, no
+//! init needed; docs/13). After DDR is up the stack is raised into high DRAM
+//! before the image copy, which targets the low DRAM the scratch stack sat near.
 #![no_std]
 #![no_main]
 
