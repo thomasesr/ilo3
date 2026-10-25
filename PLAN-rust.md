@@ -167,8 +167,14 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    section), issues a random 256-bit bearer token (30-min TTL). An `Auth` extractor validates
    `Authorization: Bearer <token>` on every `json/*` endpoint and enforces `Privileges`; `logout`
    invalidates the token. A default `Administrator` (random password, logged once) is provisioned at
-   boot if the DB is empty. ☐ IPMI (KCS, docs/36), ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35),
-   ☐ flesh out the full json/* endpoint set (docs/33) + config (nvram) wiring.
+   boot if the DB is empty.
+   ⏳ **IPMI** (docs/36): ☑ message core + dispatch (`firmware/src/ipmi.rs`, transport-agnostic —
+   NetFn/cmd → completion-code+data) with Get Device ID, Get Chassis Status, Chassis Control
+   (→ host-power HAL), Get Sensor Reading (→ sensors); ☑ KCS BMC-side state machine
+   (`firmware/src/kcs.rs`, IPMI §9) — register offsets at 0x01F0D400 flagged CONFIRM-ON-HW (docs/05
+   only locates the block), not spawned yet. ☐ DCMI, SDR/SEL/FRU store, IPMI-over-LAN (RMCP+),
+   HP OEM (OEMHP_*). ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35), ☐ full json/* set (docs/33) +
+   config (nvram) wiring.
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
