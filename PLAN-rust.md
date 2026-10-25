@@ -206,8 +206,12 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
    14-byte-checksum header validation, per-message length/channel-id header, CCB ownership
    handshake (bit31), 10 channel descriptors, `poll_rx`/`rx_release`/`send` + host doorbell ring.
    Transport only; CCB convention/widths = CONFIRM-ON-HW. ☐ channel→service routing (IPMI-over-PCI
-   → `ipmi`, inventory, power), ☐ SMBIOS inventory over ROM-CHIF (docs/22), ☐ host power/state feed.
-   HW-gated (needs host PCI + the kernel-provided window).
+   → `ipmi`, inventory, power).
+   ☑ **SMBIOS inventory parser** (`firmware/src/smbios.rs`, docs/22): DMTF SMBIOS record parser
+   (header + string-set walker) + type-4 Processor (socket/manufacturer/model/max-speed/cores/
+   populated) + type-17 Memory Device (locator/size/speed/type/populated) extractors, plus the
+   ROM-CHIF opcode-3 "get record by type" request builder. Parsers are testable now; the fetch
+   rides `chif` (HW-gated). ☐ host power/state feed. HW-gated (needs host PCI + the window).
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
 
