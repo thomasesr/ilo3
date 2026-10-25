@@ -128,6 +128,8 @@ firmware/               the main firmware binary crate (runs from DDR @ 0x200000
   src/heap.rs           global allocator over the DDR heap (~14.8 MB; embedded-alloc)
   src/tls13.rs          TLS 1.3 key schedule + record protection (RFC 8446)
   src/certstore.rs      TLS cert/key store: PEM/DER, flash-backed (docs/32)
+  src/users.rs          account DB + privilege bitmap + argon2 hashing (docs/38)
+  src/nvram.rs          flash-backed config K-V store, wear-leveled (docs/38)
 spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replacement)
   link-spl.x            flash XIP map (0xFFFF0000, 64K; no .data/.bss pre-DDR)
   build.rs              search path + emits -Tlink-spl.x

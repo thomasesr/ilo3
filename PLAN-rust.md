@@ -155,8 +155,15 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
     `s_client`** (TLS 1.3 + CHACHA20 + X25519 + Ed25519 + mTLS + app data; secrets/keys byte-match
     `-keylogfile`). X.509 parsing is hand-rolled (`src/x509.rs`, Ed25519 only) — `x509-parser` won't
     build on no_std (nom→minimal-lexical needs std). Not HW-gated; the stack is ready.
-5. **Management services** — IPMI (KCS), SSH CLI, SNMP agent, a minimal HTTPS status+control UI
-   (web server = **picoserve**, see the dedicated plan below).
+5. **Management services** — ⏳ **IN PROGRESS**. Foundations first:
+   ☑ **account DB + privilege model** (`firmware/src/users.rs`, docs/38): ≤12 accounts, Argon2id
+   PHC hashes (tuned to 4 MB/3 passes to fit the heap; salt from the entropy pool), `Privileges`
+   bitflags (6 core + 7 extended), login lockout. ☑ **NVRAM config K-V store** (`firmware/src/
+   nvram.rs`, docs/38): named keys + per-key privilege mask, ping-pong wear-leveled across two
+   64 KB flash blocks with a seq number + CRC (atomic: a mid-write power loss falls back to the
+   prior block). Both build-clean, flash I/O = CONFIRM-ON-HW. ☐ wire auth/config into the services.
+   ☐ IPMI (KCS, docs/36), ☐ SSH CLI (docs/34), ☐ SNMP agent (docs/35), HTTPS UI = **picoserve**
+   (`web.rs`, scaffolded; see the dedicated plan below) — flesh out the json/* endpoints (docs/33).
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.

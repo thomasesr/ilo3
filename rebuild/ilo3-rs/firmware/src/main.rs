@@ -50,6 +50,8 @@ mod web; // picoserve HTTPS server (Phase 5)
 mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
 mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
+mod nvram; // flash-backed config K-V store (docs/38)
+mod users; // local account DB + privileges + argon2 (docs/38)
 mod uart;
 mod vectors; // ARM exception vectors + IRQ dispatch
 use uart::Uart;

@@ -36,6 +36,11 @@ embassy-time-driver = "0.2"
 # + src/chacha.rs) — no ppv-lite86/SIMD deps that fight ARMv5.
 rand_core = { version = "0.6", default-features = false }
 
+# Account DB: privilege bitmap + password hashing (docs/38). argon2 for new
+# hashes; memory param is tuned down (4 MB) to fit the heap on 250 MHz ARMv5.
+bitflags = { version = "2", default-features = false }
+argon2 = { version = "0.5", default-features = false, features = ["alloc", "password-hash"] }
+
 # Global allocator over a DDR heap region (linker-reserved, src/heap.rs). Uses
 # our critical-section impl for locking. alloc unblocks the TLS session state
 # machine + the alloc-using management services.
