@@ -110,3 +110,25 @@ method pointers — the TX path `0x2d608` loops 32 descriptors and calls `blx [d
 not hardware ring registers). The hardware ring-base / head / tail registers and the on-wire
 descriptor format live below this abstraction in the kernel DMA layer and are **not recoverable
 from static RE** — they must be pinned during hardware bring-up. IRQ 16 (MAC0) / 17 (MAC1), docs/12.
+
+## RE update (2026-10-21): DMA ring confirmed object-mediated (datapath blocked)
+
+Disassembled the `umac` driver in `decompiled/kernel_type2.bin` (realigned, base 0) to try to
+recover the TX/RX ring descriptor base registers. Findings:
+
+- **MAC base pointer = driver struct `+0x04`.** Station-addr writer (`0x2d59c`): reads the base
+  from `[struct+4]`, writes the 6 address bytes to `[base+0x18/+0x1c/+0x20]` — confirms docs/11's
+  ADDR0/1/2. Hash flush (`0x2d578`): `[base+0x24] = struct+0x15c`, `[base+0x28] = struct+0x158`.
+- **The open/init path (`0x2d604`) does NOT write any ring-base MMIO.** It is a 0..31
+  registration loop that allocates/attaches per-index objects (`bl 0x2caec`, result at
+  `[struct+0xc]`) and drives them through **INTEGRITY DMA object method pointers**
+  (`ldr r1,[obj+8]; blx r1` and `ldr r1,[obj+0xc]; blx r1`). The TX/RX descriptor ring base,
+  head/tail and descriptor layout live *inside* those generic DMA-object methods, not as MAC
+  register literals in the driver.
+
+**Conclusion: the ring format is genuinely not statically recoverable from the driver** (confirms
+the original docs/11 note). Recovering it needs either on-hardware reconstruction (observe the
+descriptor memory + MAC registers on a running board) or a Gromit-XE MAC datasheet. **Phase 3
+networking is therefore HW-gated at the MAC datapath**: the Rust side builds the full smoltcp stack
+behind a `MacDriver` ring seam (`firmware/src/net.rs`), ready to drop the real ring in once pinned
+on hardware. MDIO + MAC config (reset/addr/hash) are usable now (`firmware/src/mac.rs`).

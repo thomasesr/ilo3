@@ -66,18 +66,123 @@ Each entry: what to RE from the binary vs what is a standard to build to spec.
      ☑ embassy executor on ARMv5 (`embassy-executor` 0.10 `platform-spin`; 2 async tasks
      interleave via `yield_now`). Needed a custom target (`armv5te-ilo3.json`, `atomic-cas`)
      + `__atomic_*` single-core libcall shims (`src/atomics.rs`) — ARM926 has no LDREX.
-     ☐ `embassy-time-driver` over the timer (real `Timer::after`; rides on the Wallace tick IRQ) ·
-     ☐ MMU bring-up (ARM926 vector base `0x0`/`0xFFFF0000` → unblocks live IRQ delivery) ·
-     ☐ SPL (DDR init + SPI-NOR load) · ☐ hardware validation (board / custom QEMU machine).
-2. **Platform HAL** — I2C, SPI-NOR, PECI, CPLD-gpio, fan scan-chain, MAC+MDIO (port the other 5
-   drivers). Sensor/power/fan/PSU control (`docs/08`,`09`,`20`,`22`-`27`).
-3. **Networking** — `smoltcp` on the GXE MAC; DHCP/DNS/SNTP/syslog (RFC crates).
-4. **Crypto/TLS** — `rustls` + a **software entropy pool** (timer-jitter CSPRNG, `docs/32`);
-   cert/key store (PKCS8/PEM in flash).
-5. **Management services** — IPMI (KCS), SSH CLI, SNMP agent, a minimal HTTPS status+control UI.
+     ☑ MMU bring-up (`src/mmu.rs`): ARMv5 one-level (1 MB section) table — identity-map all
+     4 GB (docs/10 VA=PA), MMIO device / DDR write-back cached, `L1[0]`=fault (null-catch);
+     **high vectors** (SCTLR V=1 → base `0xFFFF0000`) with section `0xFFF00000` aliased to a
+     reserved top DDR MB (`_vectors_phys` `0x20F00000`, link.x) so the vector table is writable.
+     CP15 enable seq (TTBR0/DACR-manager/inval-TLB+cache/drain-WB/SCTLR M·C·I·V/prefetch-flush)
+     disasm-verified. **Live IRQ now wired**: vectors installed @ base, Wallace tick (IRQ 36)
+     → counting handler, CPSR I-bit cleared; heartbeat prints `irq_ticks`. (Wallace reload rate
+     + tick ack = CONFIRM ON HW.)
+     ☑ `embassy-time-driver` (`src/time_driver.rs`): global `Driver` over the 64-bit counter
+     (`now()`, 1 MHz = embassy `tick-hz-1_000_000`) + a heapless generic timer queue (cap 16,
+     standalone so it doesn't pin the executor version). Tick-based wake: `schedule_wake` parks
+     the waker, the live Wallace IRQ calls `on_tick` → `next_expiration` wakes elapsed deadlines.
+     `heartbeat`/`ticker` now sleep on real `Timer::after` (1 s / 500 ms), not busy-wait. (Timer
+     resolution = Wallace period; one-shot reload is the HW-confirmed refinement.)
+     ☑ SPL / first-stage loader (`spl/` crate, XIP @ `0xFFFF0000` = flash `0x7f0000`, the HP
+     boot-ROM replacement of docs/31): reset vectors + CP15 (MMU/caches off) + scratch SP
+     `0x20004000` → **DDR3 init register-exact from docs/30** (`spl/src/ddr.rs`: warm-check,
+     500-tick delay, phase-1 timing table, `0x3` start, bit7 cal-poll, phase-2 `0x2`+`0x80200040`,
+     MEMCFG=strap>>1) → raise SP into high DRAM → **copy main fw flash→DDR → jump `0x20000000`**
+     (`spl/src/flash.rs`; flash is XIP-readable, so load = memcpy, no SMIF FIFO). Packaging:
+     `tools/pack-flash.py` builds the 8 MB image (payload+header @0, SPL @`0x7f0000`); byte-verified.
+     SPL flat bin = 1.4 KB. **Clock gap RESOLVED** (deeper boot-ROM RE, docs/30 2026-10-21 update):
+     the operative path (fn `0x7f198c`) does NO PLL/clock reprogram — DDR trains on the strap-default
+     clock; the PLL (`0x80200000+0x88`) is touched only on the `*0xD1000000 & 3 == 0` branch, which
+     the fitted board doesn't take (real DDR values are in the static table). `ddr.rs` is a verbatim
+     port of the `0x7f1a0c` table (ROM order, byte-verified) + `clock_mode()` self-check (warns if 0)
+     + bounded cal-poll (Status::CalTimeout → halt, no infinite spin). HW-confirms: ASIC rev >4 and
+     `*0xD1000000 & 3 != 0` (SPL self-checks the latter); full path = CONFIRM-ON-HW via SPI programmer.
+     ☐ hardware validation (board / custom QEMU machine).
+2. **Platform HAL** — ⏳ **IN PROGRESS**. ☑ All 6 register drivers ported to the Rust HAL
+   (`firmware/src/`, build-clean, dead-code-eliminated until services consume them):
+   `cpld.rs` (bit-addressable CPLD/pwrmicro: UID/PSU/fan-latch, docs/08-09) ·
+   `spinor.rs` (SMIF flash controller read/erase/program, docs/15/17) ·
+   `i2c.rs` (8-engine I2C/SMBus, docs/16) · `peci.rs` (native PECI engine + rev-strap timing,
+   docs/26; descriptor/DMA = CONFIRM-ON-HW) · `fan.rs` (CPLD PWM/tach scan-chain + latch,
+   docs/27) · `mac.rs` (2 NICs: MDIO/reset/station-addr/mcast-hash CONFIRMED; TX/RX DMA rings
+   deferred to Phase 3, docs/11). ⏳ **Services** on the HAL:
+   ☑ `power.rs` (host power HAL — state read + on/graceful/force/warm-reset/NMI/cold-cycle,
+   docs/24, all CONFIRMED) · ☑ `sensors.rs` (temp read mechanisms — LM75/I2C + PECI GetTemp;
+   topology/thresholds = SDR placeholder, docs/25) · ☑ **`thermal.rs`** — the SAFETY-CRITICAL
+   fan service (docs/42): per-sensor demand → FASTEST/SINGLE/AVERAGE grouping → clamp+hysteresis
+   → scan-chain PWM, with the **fail-safe** (boot=MAX, any sensor error→zone MAX, critical→graceful
+   host shutdown). Live embassy task; first service that links the whole HAL chain (bin +3.5 KB).
+   Fan-control is iLO's small role (BIOS owns policy) — curve/thresholds/groupings = board SDR
+   (PLACEHOLDER, validate under thermal load before trusting).
+   ☑ `psu.rs` (panda PSU telemetry over I2C, docs/19/20: `[reg,cksum]`→`[lo,hi,pec]` transaction
+   with sum-to-0 check + 3 retries, fw-rev/status/current/peak; presence/enable via CPLD; raw→
+   physical scale = SDR Open) · ☑ `drives.rs` (backplane SEP over I2C, docs/23: ACK-probe discovery
+   0x70-0x77, UID-set D8/status D2/SGPIO D2 frames — CONFIRMED frame literals; D8 chk + bit masks
+   flagged). Both build-clean, DCE'd until a health/inventory/SNMP consumer wires them.
+   ☐ SMBIOS CPU/mem inventory (docs/22) — **blocked on CHIF** (ROM-CHIF transport), deferred to
+   Phase 6. ☐ HW bring-up of the flagged items. **Phase 2 is otherwise complete** (6 drivers +
+   power/sensors/thermal/psu/drives; only the CHIF-dependent SMBIOS path remains).
+3. **Networking** — ⏳ **IN PROGRESS**. ☑ `smoltcp` 0.12 TCP/IP stack built (`firmware/src/net.rs`):
+   `GxeDevice` phy over a `MacRing` seam + an embassy `net_task` running the interface and a
+   **DHCPv4** client (applies address/router on `Configured`). Builds clean, live task (bin +28 KB).
+   **BLOCKED at the datapath**: the MAC TX/RX DMA ring is RE-confirmed *not* statically recoverable
+   (docs/11 2026-10-21 update — the driver drives INTEGRITY DMA object methods, no descriptor-base
+   MMIO), so `StubRing` yields no RX / drops TX. The entire stack is ready; reconstruct the ring on
+   hardware (observe descriptor memory + MAC regs on a live board) and implement `MacRing` for it.
+   ☐ DNS/SNTP/syslog (RFC crates) on top once the ring passes traffic. MDIO + MAC config usable now.
+4. **Crypto/TLS** — ⏳ **IN PROGRESS**. ☑ **software entropy pool** (`firmware/src/rng.rs` +
+   `chacha.rs`, docs/32): sponge pool (ChaCha20 permute) → reseedable ChaCha20 DRBG, `rand_core`
+   `RngCore`+`CryptoRng` (`SystemRng`). Sources: boot timer-jitter harvest (4096 samples) + Wallace
+   IRQ-arrival timing + thermal-task tach/temp/read-timing stirring — all low-credit, conditioned.
+   Live at boot; self-contained (no ppv-lite86). **Output UNVERIFIED** — needs a NIST SP 800-90B
+   entropy assessment on real HW before any key is generated from it.
+   ☑ **TLS 1.3 crypto primitives** (`firmware/src/crypto.rs`): vetted RustCrypto crates that build
+   clean no_std on ARMv5 — `chacha20poly1305` (AEAD), `sha2`, `hkdf`/`hmac`, `x25519-dalek` (ECDHE)
+   = the `TLS_CHACHA20_POLY1305_SHA256` suite. Keyed from `rng::SystemRng`. **Power-on self-test**
+   (`crypto::selftest`): SHA-256 + X25519 KATs (FIPS/RFC vectors) + AEAD round-trip & tamper check,
+   run at boot (+24 KB linked). (Can't execute here; vectors are RFC-exact, self-checks on HW.)
+   ☑ **heap / global allocator** (`firmware/src/heap.rs`): `embedded-alloc` LLFF over the DDR gap
+   between `.bss` and the stack (link.x `_heap_start`.._heap_end` ≈ 14.8 MB), locked via our
+   critical-section; NOLOAD (no boot cost). `alloc` is now available firmware-wide.
+   ☑ **TLS 1.3 key schedule + record layer** (`firmware/src/tls13.rs`, RFC 8446 §7.1/§5.2):
+   Extract / Expand-Label / Derive-Secret → early/handshake/master secret tree → per-direction
+   traffic secrets → {key, iv, finished_key}; transcript hash; Finished MAC; record AEAD with
+   nonce = iv⊕seq. Built on the primitives + heap; RFC-verifiable crypto core.
+   ☑ **cert/key store** (`firmware/src/certstore.rs`): PEM→DER (hand-rolled base64), server cert +
+   PKCS8 key held on the heap, persisted in a 64 KB flash block via `spinor` (CONFIRM-ON-HW).
+    ☑ **TLS 1.3 handshake state machine** (`firmware/src/tls_handshake.rs`, 2026-10-22) — full server
+    side: ClientHello parse, ServerHello, EncryptedExtensions, CertificateRequest, Certificate,
+    CertificateVerify (Ed25519, `64 spaces ‖ context ‖ 0x00 ‖ hash`), Finished, mTLS client-cert
+    chain verify. Streaming `client_record` for multi-record flights; record padding + inner
+    content-type + per-key-epoch seq reset handled. **Validated end-to-end against real OpenSSL
+    `s_client`** (TLS 1.3 + CHACHA20 + X25519 + Ed25519 + mTLS + app data; secrets/keys byte-match
+    `-keylogfile`). X.509 parsing is hand-rolled (`src/x509.rs`, Ed25519 only) — `x509-parser` won't
+    build on no_std (nom→minimal-lexical needs std). Not HW-gated; the stack is ready.
+5. **Management services** — IPMI (KCS), SSH CLI, SNMP agent, a minimal HTTPS status+control UI
+   (web server = **picoserve**, see the dedicated plan below).
 6. **Host interface** — CHIF server (`docs/28`), SMBIOS inventory, host power/state.
 7. **(hard, optional)** vUSB/vMedia (`docs/29`) + KVM video (`docs/14`) — likely too heavy on
    250 MHz ARMv5; defer / may stay unsupported.
+
+## Web server (picoserve) — implementation plan
+
+Chosen stack (DECIDED 2026-10-22): **picoserve** HTTP on **smoltcp** + our own TLS 1.3 layer
+(`src/tls_handshake.rs`), NOT rustls/embassy-net/edge-http. Rationale: rustls's `ServerConnection`
+is `std`-gated (no_std = low-level `unbuffered` API only) and its default crypto providers
+(aws-lc-rs/ring) won't build on armv5te; embedded-tls is client-only + AES-GCM-only. picoserve is
+crypto-agnostic and runs over any async Read+Write stream, so our validated TLS feeds it plaintext.
+
+Data path: `smoltcp TcpSocket → async embedded-io-async adapter → TlsStream (record framing +
+encrypt/decrypt) → picoserve`.
+
+- **Deps**: `picoserve 0.20` (default-features off, no `embassy`/`embassy-net`), `embedded-io 0.7`,
+  `embedded-io-async 0.7`, `serde` (derive, no_std). Transitive: futures-util, heapless 0.9,
+  thiserror 2 — all no_std-clean.
+- **Timer**: implement `picoserve::time::Timer` (one method `delay`) over `embassy_time::Timer`.
+- **Modules**: `src/tcp.rs` (smoltcp async bridge: `recv_slice`/`send_slice` + `register_recv_waker`/
+  `register_send_waker`), `src/tls_stream.rs` (record framing + handshake driver + async Read/Write),
+  `src/web.rs` (Router + `json/*` handlers + connection task).
+- **Endpoints (first cut)**: `json/overview`, `json/health_summary`, `json/host_power`, `json/network`,
+  `json/sessions` — grow to the 58-name contract in `docs/33`.
+- **HW-gated**: real traffic waits on the MAC ring (`docs/11`); built + validated structurally against
+  a local host harness (curl), like the TLS layer was against OpenSSL.
 
 ## Recommended RE order (application layer)
 

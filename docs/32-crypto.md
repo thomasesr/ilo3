@@ -76,3 +76,27 @@ classic weak spot for an embedded TLS stack. The Rust rewrite must build its own
   afterthought — the original's software PRNG was a likely weakness.
 - The exact `klite` crypto API (request/response framing over the socket) if a drop-in service
   boundary is wanted; for a clean Rust rewrite, just use `rustls` directly instead.
+
+## Rust rewrite: entropy pool implemented (2026-10-21)
+
+Built `firmware/src/rng.rs` + `firmware/src/chacha.rs` — the first-class software entropy pool
+docs/32 calls for. Design: a **sponge pool** (ChaCha20 permutation over a 16-word state) absorbs
+noise samples and seeds a **reseedable ChaCha20 DRBG**; exposed as `rand_core::RngCore +
+CryptoRng` (`SystemRng`) for the rand/rustls ecosystem. Self-contained ChaCha20 (no ppv-lite86/
+SIMD deps that fight ARMv5).
+
+**Entropy sources mixed in** (all low-credit, conditioned by the pool — none trusted alone):
+1. **Timer jitter** (primary): counter `0xC0000098` LSBs sampled around a small variable-timing
+   memory workload, 4096 samples at boot (`rng::init`). Leans on IRQ preemption + DRAM-refresh
+   stalls (the ~1 MHz placeholder counter is too coarse for per-instruction jitter).
+2. **IRQ-arrival timing** (continuous): the Wallace tick handler folds the counter value at each
+   interrupt into the pool (`rng::feed_timing`).
+3. **Tach + temperature + read-timing** (continuous): the thermal task stirs in one fan's raw tach
+   count, the per-sensor temperature demands, and the counter at sample time each tick. Sensor/fan
+   LSB + edge-phase noise — low-rate, correlated, so **near-zero credited entropy**, but free and
+   strictly additive.
+
+**MUST DO before trusting for keys** (CONFIRM-ON-HW): a NIST SP 800-90B-style entropy assessment
+on real hardware with the real counter rate. Until then the pool output is UNVERIFIED — do not
+generate TLS/host keys from it. (iLO 3's original software PRNG was a likely weakness; getting this
+right is the point.)

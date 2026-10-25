@@ -1,0 +1,16 @@
+[package]
+name = "ilo3-spl"
+version = "0.0.1"
+edition = "2021"
+description = "Gromit-XE first-stage loader (SPL): clock + DDR3 init, load main firmware, jump"
+
+[[bin]]
+name = "ilo3-spl"
+path = "src/main.rs"
+test = false
+bench = false
+
+# No dependencies: the SPL is pure no_std + register pokes. It runs XIP from
+# flash at 0xFFFF0000 before DRAM exists, so it must have no .data/.bss touched
+# pre-DDR and no heap/atomics — just .text/.rodata in flash + a scratch stack.
+[dependencies]

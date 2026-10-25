@@ -51,6 +51,9 @@ pub fn delay_us(us: u32) {
 
 // ---------------- Wallace clockevent (periodic OS tick) ----------------
 
+/// Wallace clockevent IRQ line (docs/12: IRQ 36 = bank1 line 4).
+pub const WALLACE_IRQ: usize = 36;
+
 const WAL_BASE: usize = 0xD100_0000;
 const CE_STATUS: usize = 0x00;
 const CE_RELOAD: usize = 0x04;

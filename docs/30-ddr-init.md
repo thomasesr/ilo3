@@ -54,6 +54,11 @@ these straps — read, don't hardcode, on a different board.
 
 ## Clock / strap config (boot ROM)
 
+> **Partly SUPERSEDED — see "RE update (2026-10-21)" below.** The clock-select strap is
+> `0xD1000000` (bits[1:0]), not `0x801F00A4` (which is only the MEMCFG `>>1` source), and
+> the PLL (`+0x88`) is reprogrammed only on the clock-mode==0 branch — not on the operative
+> table-walk path. The table/addresses below are still valid; the *interpretation* is corrected.
+
 DDR timing + the whole clock tree derive from board **straps**. RE of the clock setup
 (`0x7f1540`-`0x7f1b2c`):
 
@@ -90,3 +95,52 @@ The `0x80200000` block is the Gromit-XE **clock/PLL/reset controller** (distinct
   boot the same hardware.
 - DRAM size: the `0xC0000064` MEMCFG (strap-derived) encodes geometry; the 32 MB figure in the DT
   is a placeholder — confirm from the strap/MEMCFG on hardware.
+
+## RE update (2026-10-21): clock-select + the two boot paths — PLL gating RESOLVED
+
+Deeper disasm (capstone, `decompiled/bootrom_7f0000.bin`) of the clock/DDR caller
+resolves the open clock question and corrects two earlier points.
+
+### Clock-select strap = `0xD1000000` (NOT `0x801F00A4`)
+
+The parent fn (prologue `0x7f11e8`) sets `r5 = 0xD1000000`, `r6 = 0xC0000000`, then:
+`r4 = *0xD1000000 & 3` — this is the **clock-select mode**. (`0x801F00A4` is used
+*only* for the final MEMCFG, `>> 1` → `0xC0000064`; it is not the clock selector.)
+`0xD1000000` is the "Wallace"/companion block, read via an **indexed port**: write
+an index byte to `+0x24`, read the strap word from `+0x20`.
+
+### Two DDR/clock paths, gated by ASIC rev (`0xC00000A0` bits[23:16])
+
+`fp = *0xC00000A0 & 0xFF0000; if fp > 0x40000 → 0x7f1950` (rev > 4), else falls into
+the `0x7f1240` path (rev ≤ 4). **The two paths use different DDR timing values:**
+
+- **rev > 4 (operative; docs/30 above):** `0x7f1950` → if `(*0xD1000000 & 3) == 0`
+  jump to the strap→PLL decode (`0x7f14f4`); else `bl 0x7f198c` = the **table-walk**
+  at `0x7f1a0c`, which does **NO clock/PLL reprogram** — DDR trains on the
+  strap-default clock, then `0xC0000064 = *0x801F00A4 >> 1`. This is the path the
+  values above (and `spl/src/ddr.rs`) implement.
+- **rev ≤ 4:** `0x7f1240` loads DDR timings from pc-relative tables `0x7f11b8`/`0x7f11d0`
+  indexed by `r4` (values `0x339`/`0x341b2800`/`0x00007a47`… — **different** from the
+  `0x7f1a0c` set), and on `r4 == 3` runs the same `0x7f14f4` strap decode.
+
+### PLL (`0x80200000+0x88`) is programmed ONLY on clock-mode == 0
+
+The only write to the PLL control (`0x7f1578: str r0,[0x80200000,#0x88]`) is inside
+the `0x7f14f4` strap-decode block, reached only when `(*0xD1000000 & 3) == 0` (rev>4)
+or `r4 == 3` (rev≤4). That block also computes the DDR timing regs **live** from strap
+bitfields rather than using a static table. **Because the real FW-1.94 DDR values live
+in the static `0x7f1a0c` table, the fitted board takes the table-walk path → clock mode
+is non-zero → the PLL is not reprogrammed.** So a first-stage port needs no PLL
+programming; it inherits the strap-default reset clock. (`spl/src/ddr.rs::clock_mode()`
+checks `*0xD1000000 & 3` at boot and warns if it is 0.)
+
+### Confirmed `0x7f1a0c` table (exact ROM order)
+
+Phase 1: `0x30=0x1520, 0x34=0x5, 0x38=0, 0x3c=0, 0x28=0x552C9180, 0x2c=0x50C34F,
+0x40=0xAA9658E3, 0x48=0x7D, 0x24=0x22, 0x18=0xFDF0FFF0, 0x20=0x3` (start) · term `0`.
+Phase 2: `0x20=0x2, 0x80200040=0x400` · term `0`. Then MEMCFG `0xC0000064 = strap>>1`.
+(The `0x80200040 = 0xC400` seen at `0x7f1388` is the **rev≤4** path, not this one.)
+
+### Remaining HW-confirms
+- ASIC rev of the fitted GXE (selects rev>4 vs rev≤4 timing set). docs/30 assumes rev>4.
+- `0xD1000000 & 3 != 0` on the board (selects table-walk, no-PLL path). SPL self-checks.

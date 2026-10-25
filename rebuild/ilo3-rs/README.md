@@ -19,37 +19,88 @@ firmware — see `../../PLAN-rust.md` (roadmap), `../../docs` (RE spec),
   Wallace clockevent (`0xD1000000`, IRQ36) register-exact, wired once IRQs are live.
 - ✅ ARM exception vectors + root IRQ dispatch (`src/vectors.rs`) — 8-entry table,
   `_irq_entry` → `irq_dispatch` → per-line handlers; disasm-verified.
-- ⏳ **IRQ delivery gated on the MMU sub-phase**: ARM926 has no VBAR, so the vector
-  base is `0x0`/`0xFFFF0000`, neither our DDR — Phase 1 drives time off the polled
-  counter; the IRQ path is ready and unmasks once the MMU maps RAM at the base.
+- ✅ **MMU bring-up + live IRQ delivery** (`src/mmu.rs`): ARMv5 one-level (1 MB
+  section) table — identity-map all 4 GB (docs/10 VA=PA), MMIO device / DDR
+  write-back cached, `L1[0]`=fault to catch nulls; **high vectors** (SCTLR V=1 →
+  `0xFFFF0000`) with section `0xFFF00000` aliased to a reserved top DDR MB
+  (`_vectors_phys` = `0x20F00000`, link.x) so the vector table is writable. CP15
+  enable sequence disasm-verified. Vectors installed, Wallace tick (IRQ 36) routed
+  to a counting handler, CPSR I-bit cleared → `heartbeat` prints `irq_ticks`.
+  (Wallace reload rate + tick ack still CONFIRM-ON-HW.)
+- ✅ **embassy-time Driver + real async sleep** (`src/time_driver.rs`): global
+  `embassy_time_driver::Driver` — `now()` = the 64-bit counter (1 MHz, matched to
+  `tick-hz-1_000_000`) + a standalone heapless timer queue (cap 16). Tick-based
+  wake: `schedule_wake` parks the waker; the live Wallace IRQ calls `on_tick` →
+  `next_expiration` wakes elapsed deadlines. `heartbeat`/`ticker` now use
+  `Timer::after` (interrupt-driven), not busy-wait. (Resolution = Wallace period.)
 - ✅ **embassy executor runs on ARMv5** (`embassy-executor` 0.10, `platform-spin`).
   `rust_main` starts it with two async tasks (`heartbeat`/`ticker`) that interleave
-  via `yield_now`. Proven by the linked ELF (task pools, `Executor::run`, poll fns).
+  on `Timer::after` deadlines. Proven by the linked ELF (task pools, `Executor::run`, poll fns).
 - ✅ **ARMv5 atomics friction solved** — ARM926 has no LDREX, and the stock target
   declares no atomics, so `core::sync::atomic` (used by embassy/cordyceps) wouldn't
   build. Custom target `armv5te-ilo3.json` claims `atomic-cas`+32-bit atomics; LLVM
   then emits `__atomic_*` libcalls, provided in `src/atomics.rs` as single-core
   interrupt-masking shims (correct because the BMC is single-core).
-- ⏳ **IRQ delivery gated on the MMU sub-phase**: ARM926 has no VBAR, so the vector
-  base is `0x0`/`0xFFFF0000`, neither our DDR — Phase 1 drives time off the polled
-  counter; the IRQ path is ready and unmasks once the MMU maps RAM at the base.
+- ✅ **SPL / first-stage loader** (`spl/` crate): the HP boot-ROM replacement
+  (docs/31), XIP from flash at `0xFFFF0000` (= flash `0x7f0000`, reset target).
+  Reset vectors + CP15 (MMU/caches off) + scratch SP `0x20004000` → **DDR3 init
+  register-exact from docs/30** (`spl/src/ddr.rs`) → raise SP into high DRAM →
+  copy main firmware flash→DDR → jump `0x20000000` (`spl/src/flash.rs`; flash is
+  XIP-readable so load = memcpy). `tools/pack-flash.py` assembles the 8 MB flash
+  image (payload+header @0, SPL @`0x7f0000`) — byte-verified. SPL flat bin 1.4 KB.
+  `ddr.rs` is a verbatim port of the boot-ROM `0x7f1a0c` table (byte-verified) with
+  a bounded cal-poll (timeout → halt, no infinite spin) and a `clock_mode()` self-
+  check. Clock gap resolved by deeper RE (docs/30): the operative path reprograms
+  no PLL — DDR trains on the strap-default clock (CONFIRM-ON-HW via SPI programmer).
 - ⏳ **Not yet hardware-validated** — needs a board (or a custom QEMU machine). The
   stock `qemu-system-arm -M versatilepb` is ARM926 but has a different UART/RAM map.
 
-Next (Phase 1 cont.): `embassy-time-driver` over `src/timer.rs` (replaces the busy-wait
-`delay_us` with real `Timer::after`; needs the Wallace tick IRQ, so it rides on) → MMU
-bring-up (unblocks IRQ delivery) → SPL (DDR init `docs/30` + SPI-NOR load) → HW validation.
+**Phase 2 is complete** (bar the CHIF-dependent SMBIOS path): all 6 register drivers + five
+services — **power**, **sensors**, the safety-critical **thermal/fan** controller (live embassy
+task, docs/42 fail-safe: boot=MAX, sensor error→MAX, critical→shutdown), **psu** (panda telemetry),
+and **drives** (backplane SEP). Phase 1 (MMU, live IRQ, async time, SPL) is done.
+
+**Phase 3 (networking) is built** (`src/net.rs`): a full smoltcp 0.12 TCP/IP stack + DHCPv4 client
+as a live embassy task, sitting on a `MacRing` seam. It is **HW-gated at the datapath** — the MAC
+TX/RX DMA ring is RE-confirmed not statically recoverable (docs/11: the driver uses INTEGRITY DMA
+object methods, not descriptor-base registers), so `StubRing` passes no traffic until the ring is
+reconstructed on a live board. The stack, DHCP and socket plumbing are ready for that drop-in.
+
+Phase 4 (crypto) has started: the **software entropy pool** (`src/rng.rs` + `chacha.rs`, docs/32)
+is live — a ChaCha20 sponge/DRBG seeded from boot timer-jitter and continuously stirred by IRQ
+timing + fan-tach/temperature noise, exposed as `rand_core::RngCore`. Its output is **UNVERIFIED**
+(needs a NIST SP 800-90B assessment on real hardware before any key comes from it).
+
+The **TLS 1.3 crypto primitives** are also in (`src/crypto.rs`): ChaCha20-Poly1305, SHA-256, HKDF,
+X25519 — vetted RustCrypto crates that build clean on ARMv5, keyed from the entropy pool, with a
+power-on self-test (KATs + AEAD round-trip) run at boot.
+
+A **heap/global allocator** is now in too (`src/heap.rs`, ~14.8 MB DDR via embedded-alloc), so
+`alloc` is available firmware-wide.
+
+The **TLS 1.3 crypto core** is also in now: key schedule + record layer (`src/tls13.rs`, RFC 8446)
+and the PEM/DER flash-backed **cert/key store** (`src/certstore.rs`). What remains of TLS is the
+**handshake state machine** (ClientHello/extensions, ServerHello/key_share, Certificate +
+CertificateVerify, Finished) + **X.509 chain verification** — the large negotiation part, best
+validated against a real TLS client, which needs working networking first.
+
+Next: the TLS handshake state machine (crypto on its own task so a slow handshake can't stall the
+executor, docs/47), then the management services (IPMI/SSH/SNMP/HTTPS) and the host CHIF interface
+(also unblocks SMBIOS, docs/22). Hardware-validation backlog for the incoming SPI programmer, in
+rough priority: **MAC DMA-ring reconstruction** (unblocks all networking + the TLS E2E test),
+DDR/clock bring-up, the entropy-quality assessment, and the fan/sensor/PSU SDR placeholders +
+CONFIRM-ON-HW items.
 
 ## Layout
 
 ```
-Cargo.toml              workspace (profiles: panic=abort, opt=z, LTO)
+Cargo.toml              workspace (members: firmware, spl; panic=abort, opt=z, LTO)
 rust-toolchain.toml     pin nightly + rust-src (tier-3 target → build-std)
 armv5te-ilo3.json       custom target (armv5te + atomic-cas; see atomics.rs)
-.cargo/config.toml      target=armv5te-ilo3.json, build-std, json-target-spec, -Tlink.x
-firmware/               the firmware binary crate
+.cargo/config.toml      target, build-std, json-target-spec (linker script per-crate in build.rs)
+firmware/               the main firmware binary crate (runs from DDR @ 0x20000000)
   link.x                memory map (DDR 0x20000000, 16M; docs/13)
-  build.rs              puts link.x on the linker search path
+  build.rs              search path + emits -Tlink.x
   src/main.rs           reset/startup (IRQ+SVC stacks) + rust_main + embassy tasks
   src/uart.rs           polled console UART HAL
   src/atomics.rs        __atomic_* libcall shims (single-core, no LDREX)
@@ -57,15 +108,46 @@ firmware/               the firmware binary crate
   src/intc.rs           2-bank irqchip HAL (64 IRQs; docs/12)
   src/timer.rs          64-bit monotonic counter + Wallace clockevent (docs/12)
   src/vectors.rs        ARM exception vectors + root IRQ dispatch
+  src/mmu.rs            ARMv5 MMU: identity 1 MB sections + high-vector alias
+  src/time_driver.rs    embassy-time Driver (counter + Wallace-tick wake queue)
+  src/cpld.rs           CPLD/pwrmicro bit-addressable window (UID/PSU/fan latch; docs/08,09)
+  src/spinor.rs         SMIF flash controller read/erase/program (docs/15,17)
+  src/i2c.rs            8-engine I2C/SMBus controller (docs/16)
+  src/peci.rs           native PECI engine, CPU temperature (docs/26)
+  src/fan.rs            CPLD PWM/tach scan-chain fan control (docs/27)
+  src/mac.rs            GXELAN MAC + MDIO, 2 NICs (docs/11; datapath = Phase 3)
+  src/power.rs          host power control: on/off/reset/NMI (docs/24)
+  src/sensors.rs        temperature read mechanisms: LM75/PECI (docs/25)
+  src/thermal.rs        fan control service + FAIL-SAFE, live task (SAFETY-CRITICAL; docs/42)
+  src/psu.rs            panda PSU telemetry over I2C (docs/19,20)
+  src/drives.rs         drive backplane SEP: UID/presence/health (docs/23)
+  src/net.rs            smoltcp TCP/IP stack + DHCP over the MAC (Phase 3; ring HW-gated, docs/11)
+  src/chacha.rs         self-contained ChaCha20 block/permute (CSPRNG core; docs/32)
+  src/rng.rs            software entropy pool + ChaCha20 CSPRNG, RngCore (docs/32)
+  src/crypto.rs         TLS 1.3 primitives (AEAD/SHA-256/HKDF/X25519) + power-on self-test
+  src/heap.rs           global allocator over the DDR heap (~14.8 MB; embedded-alloc)
+  src/tls13.rs          TLS 1.3 key schedule + record protection (RFC 8446)
+  src/certstore.rs      TLS cert/key store: PEM/DER, flash-backed (docs/32)
+spl/                    first-stage loader (XIP @ 0xFFFF0000; boot-ROM replacement)
+  link-spl.x            flash XIP map (0xFFFF0000, 64K; no .data/.bss pre-DDR)
+  build.rs              search path + emits -Tlink-spl.x
+  src/main.rs           reset vectors + CP15 + scratch SP + spl_main
+  src/ddr.rs            DDR3 init, register-exact (docs/30)
+  src/flash.rs          payload header + copy-to-DDR + jump
+  src/uart.rs           minimal polled console (banners)
+tools/
+  pack-flash.py         assemble the 8 MB flash image (payload + SPL)
 ```
 
 ## Build
 
 ```sh
-cargo +nightly build --release
-# flat image for flashing:
-llvm-objcopy -O binary \
-  target/armv5te-ilo3/release/ilo3-fw ilo3-fw.bin
+cargo +nightly build --release          # builds both crates (firmware + spl)
+# flat images:
+llvm-objcopy -O binary target/armv5te-ilo3/release/ilo3-fw  ilo3-fw.bin
+llvm-objcopy -O binary target/armv5te-ilo3/release/ilo3-spl ilo3-spl.bin
+# assemble the 8 MB flash image (payload @0, SPL @0x7f0000) for an SPI programmer:
+python3 tools/pack-flash.py ilo3-fw.bin ilo3-spl.bin flash.bin
 ```
 
 Requires the `nightly` toolchain with `rust-src` + `llvm-tools-preview`
@@ -74,9 +156,17 @@ target is tier-3 (no prebuilt core), so `-Zbuild-std` compiles core/alloc from
 source; `-Zjson-target-spec` enables the `.json` target — both configured in
 `.cargo/config.toml`, no command-line flags needed.
 
-## Boot model (Phase 1)
+## Boot model
 
-Single flat image linked to **run from DDR at `0x20000000`** (VMA = LMA), as if
-dropped there by an SPL/loader/debugger. The first-stage loader (SPI-NOR XIP →
-DDR init `docs/30` → copy → jump) is a later sub-phase. Unsigned boot on real
-hardware uses the sig-check flash patch (`docs/31`, offset `0x7f38bc`).
+Two stages, in one 8 MB flash image (`tools/pack-flash.py`):
+
+1. **SPL** (`spl/`) lives at flash `0x7f0000` = `0xFFFF0000`, the ARM926 reset
+   target (high vectors, VINITHI=1). On power-on it runs XIP: CP15 (MMU/caches
+   off) → scratch SP `0x20004000` → DDR3 init (`docs/30`) → raises SP into high
+   DRAM → copies the main firmware (header at flash base) into DDR → jumps.
+2. **Main firmware** (`firmware/`) runs from DDR at `0x20000000` (VMA = LMA).
+
+On hardware the image is written with an external SPI programmer — the clean
+owner route of `docs/31` (replace the signed boot ROM with this unsigned SPL),
+no sig-check patch needed since the SPL *is* the first stage. (Alternatively the
+main image can be dropped at `0x20000000` by a debugger, skipping the SPL.)

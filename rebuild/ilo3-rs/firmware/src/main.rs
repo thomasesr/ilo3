@@ -7,17 +7,48 @@
 //! Clean-room: register addresses are facts; no HP code is used.
 #![no_std]
 #![no_main]
+#![feature(impl_trait_in_assoc_type)]
+
+extern crate alloc; // global allocator in src/heap.rs
 
 use core::arch::global_asm;
+use core::cell::Cell;
 use core::fmt::{self, Write};
 use core::panic::PanicInfo;
 
+use critical_section::Mutex;
 use embassy_executor::Executor;
+use embassy_time::{Duration, Timer};
 use static_cell::StaticCell;
 
 mod atomics; // __atomic_* libcall shims (single-core, no LDREX on ARMv5)
 mod critsec; // critical-section impl (CPSR IRQ mask) — registered via set_impl!
 mod intc; // 2-bank Gromit-XE irqchip
+mod chacha; // ChaCha20 block/permute (CSPRNG core; docs/32)
+mod cpld; // system CPLD/pwrmicro bit-addressable window (UID/PSU/fan latch)
+mod crypto; // TLS 1.3 crypto primitives + power-on self-test (docs/32)
+mod heap; // global allocator over the DDR heap region
+mod peci; // native PECI engine (CPU temperature)
+mod power; // host power control (on/off/reset/NMI; docs/24)
+mod psu; // panda PSU telemetry over I2C (docs/19,20)
+mod rng; // software entropy pool + ChaCha20 CSPRNG (docs/32)
+mod mac; // GXELAN MAC + MDIO (2 NICs; datapath = Phase 3)
+mod mmu; // ARMv5 MMU: identity map + high-vector alias (unblocks live IRQ)
+mod net; // smoltcp TCP/IP stack over the MAC (Phase 3; ring HW-gated)
+mod drives; // drive backplane SEP: UID/presence/health (docs/23)
+mod fan; // CPLD PWM/tach scan-chain fan control
+mod i2c; // 8-engine I2C/SMBus controller
+mod sensors; // temperature read mechanisms (PECI/LM75; docs/25)
+mod spinor; // SMIF SPI boot-flash controller (read/erase/program)
+mod thermal; // fan control service + fail-safe (SAFETY-CRITICAL; docs/42)
+mod tls13; // TLS 1.3 key schedule + record protection (RFC 8446)
+mod tls_handshake; // TLS 1.3 server handshake state machine (mTLS, Ed25519)
+mod tls_stream; // TLS 1.3 async stream over an async transport (Phase 5 web)
+mod x509; // minimal X.509 DER parse + Ed25519 cert/chain verify (mTLS)
+mod tcp; // smoltcp TCP → async embedded-io-async bridge
+mod web; // picoserve HTTPS server (Phase 5)
+mod certstore; // TLS cert/key store (PEM/DER, flash-backed; docs/32)
+mod time_driver; // embassy-time Driver over the monotonic counter + Wallace tick
 mod timer; // 64-bit monotonic counter + Wallace clockevent
 mod uart;
 mod vectors; // ARM exception vectors + IRQ dispatch
@@ -64,61 +95,150 @@ fn wfi() {
     unsafe { core::arch::asm!("mcr p15, 0, {0}, c7, c0, 4", in(reg) 0u32) };
 }
 
+/// Live IRQ tick counter, bumped by the Wallace clockevent handler.
+static TICKS: Mutex<Cell<u32>> = Mutex::new(Cell::new(0));
+
+/// Wallace clockevent handler (IRQ 36): ack the timer and count the tick. Runs
+/// in IRQ mode with IRQs masked; registered via `vectors::set_handler`.
+fn wallace_tick() {
+    timer::wallace_ack();
+    critical_section::with(|cs| {
+        let c = TICKS.borrow(cs);
+        c.set(c.get().wrapping_add(1));
+    });
+    time_driver::on_tick(); // wake any embassy Timers whose deadline elapsed
+    rng::feed_timing(timer::now_ticks() as u32); // IRQ-arrival jitter → entropy pool
+}
+
+/// Read the live IRQ tick count.
+fn ticks() -> u32 {
+    critical_section::with(|cs| TICKS.borrow(cs).get())
+}
+
+/// Unmask IRQs at the CPU by clearing the CPSR I-bit (ARMv5 has no `cpsie`).
+///
+/// # Safety
+/// Call only after the vectors are installed and IRQ handlers registered.
+unsafe fn enable_irqs() {
+    core::arch::asm!(
+        "mrs {t}, cpsr",
+        "bic {t}, {t}, #0x80",   // clear I (IRQ enable)
+        "msr cpsr_c, {t}",
+        t = out(reg) _,
+        options(nomem, nostack, preserves_flags),
+    );
+}
+
 #[no_mangle]
 pub extern "C" fn rust_main() -> ! {
     let mut con = Uart::console();
     let _ = writeln!(con, "\n[ilo3-rs] Gromit-XE bring-up — hello from Rust on ARM926EJ-S");
     let _ = writeln!(con, "[ilo3-rs] UART @ 0xC00000F0, RAM @ 0x20000000");
 
+    // MMU on: identity map + write-back DDR + high-vector alias. This puts
+    // writable RAM under the CPU exception base (0xFFFF0000) so the vector
+    // table is installable and interrupts can finally be taken.
+    mmu::init();
+    let _ = writeln!(
+        con,
+        "[ilo3-rs] mmu: on — identity 1 MB sections, DDR cached, high vectors @ {:#010x}",
+        mmu::VECTOR_BASE
+    );
+
+    // Global allocator over the DDR heap region (now that the MMU maps it).
+    let heap_sz = heap::init();
+    let _ = writeln!(con, "[ilo3-rs] heap: {} KB DDR global allocator", heap_sz / 1024);
+
     // irqchip: mask all lines and clear pending (exercises critical-section).
     intc::init();
     let _ = writeln!(con, "[ilo3-rs] intc: 2 banks / 64 IRQs masked + cleared");
 
-    // Interrupt delivery (vector install + IRQ unmask + Wallace tick) waits on
-    // the MMU/SPL sub-phase — the CPU exception base (0x0 / 0xFFFF0000) isn't
-    // our DDR until the MMU can map writable RAM there (see vectors.rs). The
-    // vector table, IRQ dispatch and Wallace clockevent are register-exact and
-    // ready; Phase 1 drives time off the polled monotonic counter instead.
+    // Install the exception vectors at the (now mapped) high-vector base and
+    // make them visible to instruction fetch.
+    // SAFETY: mmu::init() mapped 64+ writable bytes at VECTOR_BASE for this.
+    unsafe { vectors::install_vectors(mmu::VECTOR_BASE) };
+    mmu::sync_icache();
+    let _ = writeln!(con, "[ilo3-rs] vectors: installed @ {:#010x}", mmu::VECTOR_BASE);
+
+    // Live-IRQ proof: route the Wallace periodic tick (IRQ 36) to a counting
+    // handler, unmask it, arm the timer, then drop the CPSR I-bit. Tick rate is
+    // strap/PLL-derived — the reload is a placeholder (CONFIRM ON HW).
+    vectors::set_handler(timer::WALLACE_IRQ, wallace_tick);
+    intc::enable(timer::WALLACE_IRQ);
+    timer::wallace_start_periodic(timer::TIMER_HZ); // ~1 tick/placeholder-second
+    // SAFETY: vectors installed + handler registered before IRQs are unmasked.
+    unsafe { enable_irqs() };
     let _ = writeln!(
         con,
-        "[ilo3-rs] timer: 64-bit monotonic counter @ 0xC0000098, {} Hz (placeholder)",
-        timer::TIMER_HZ
+        "[ilo3-rs] timer: monotonic @ 0xC0000098 + Wallace tick IRQ {} live",
+        timer::WALLACE_IRQ
     );
 
+    // Seed the software entropy pool from timer jitter (docs/32: no HW TRNG).
+    // Blocks briefly harvesting samples; the Wallace IRQ keeps reseeding it.
+    rng::init();
+    let _ = writeln!(con, "[ilo3-rs] rng: entropy pool seeded (ChaCha20 CSPRNG) — QUALITY UNVERIFIED");
+
+    // Crypto power-on self-test: KATs (SHA-256, X25519) + AEAD round-trip. A FAIL
+    // means a miscompile/bug in the primitives — refuse to trust crypto if so.
+    if crypto::selftest() {
+        let _ = writeln!(con, "[ilo3-rs] crypto: self-test PASS (ChaCha20-Poly1305 / SHA-256 / X25519)");
+    } else {
+        let _ = writeln!(con, "[ilo3-rs] crypto: self-test FAIL — primitives unusable");
+    }
+
+    // Safety-critical: force fans to MAX before anything else runs — the boot
+    // default is cooling-ON, never off (docs/42). The thermal task re-asserts
+    // this on its first poll and takes over control from there.
+    thermal::init_failsafe();
+    let _ = writeln!(con, "[ilo3-rs] thermal: boot fail-safe — fans MAX");
+
     let _ = writeln!(con, "[ilo3-rs] starting embassy executor (platform-spin)...");
+
+    // Shared smoltcp socket set — used by both net_task (poll) and web_task.
+    tcp::init();
 
     // Hand the console to the async world and start the cooperative executor.
     let executor = EXECUTOR.init(Executor::new());
     executor.run(|spawner| {
         spawner.spawn(heartbeat().unwrap());
         spawner.spawn(ticker().unwrap());
+        spawner.spawn(thermal::thermal_task().unwrap());
+        spawner.spawn(net::net_task().unwrap());
+        spawner.spawn(web::web_task().unwrap());
     });
 }
 
 static EXECUTOR: StaticCell<Executor> = StaticCell::new();
 
-/// Proof-of-life async task: prints the monotonic counter once a second,
-/// yielding the executor between beats so `ticker` interleaves.
+/// Proof-of-life async task: prints the monotonic counter once a second. The
+/// `Timer::after` sleep parks the executor and is woken by the Wallace tick IRQ
+/// (via the embassy-time Driver) — real interrupt-driven async, not busy-wait.
 #[embassy_executor::task]
 async fn heartbeat() {
     let mut con = Uart::console();
     let mut n = 0u32;
     loop {
-        let _ = writeln!(con, "[hb] heartbeat {} — monotonic={}", n, timer::now_ticks());
+        let _ = writeln!(
+            con,
+            "[hb] heartbeat {} — monotonic={} irq_ticks={}",
+            n,
+            timer::now_ticks(),
+            ticks()
+        );
         n = n.wrapping_add(1);
-        timer::delay_us(1_000_000);
-        embassy_futures::yield_now().await; // cooperative hand-off
+        Timer::after(Duration::from_secs(1)).await;
     }
 }
 
-/// Second task — demonstrates the executor interleaving two futures.
+/// Second task — interleaves with `heartbeat` on a different async cadence,
+/// proving the time Driver services multiple concurrent deadlines.
 #[embassy_executor::task]
 async fn ticker() {
     let mut con = Uart::console();
     loop {
         let _ = writeln!(con, "[tk] .");
-        timer::delay_us(1_000_000);
-        embassy_futures::yield_now().await;
+        Timer::after(Duration::from_millis(500)).await;
     }
 }
 

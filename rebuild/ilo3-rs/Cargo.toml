@@ -3,7 +3,7 @@
 # See ../../PLAN-rust.md (roadmap) and ../../docs (RE spec).
 [workspace]
 resolver = "2"
-members = ["firmware"]
+members = ["firmware", "spl"]
 
 # Size + bare-metal defaults for all profiles.
 [profile.release]

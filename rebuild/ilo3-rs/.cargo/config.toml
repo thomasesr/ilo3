@@ -16,8 +16,10 @@ build-std-features = ["compiler-builtins-mem"]
 json-target-spec = true
 
 [target.armv5te-ilo3]
+# NB: the linker script is NOT set here — each crate's build.rs emits its own
+# `-Tlink*.x` (firmware → link.x @ 0x20000000, spl → link-spl.x @ 0xFFFF0000),
+# so the two bin crates link to different addresses under one target.
 rustflags = [
-  "-C", "link-arg=-Tlink.x",      # our linker script (firmware/link.x)
   "-C", "link-arg=--nmagic",      # don't page-align sections (flat image)
   "-C", "target-cpu=arm926ej-s",  # ARMv5TEJ, no VFP/NEON
 ]

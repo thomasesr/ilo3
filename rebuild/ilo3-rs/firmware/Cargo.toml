@@ -23,5 +23,56 @@ portable-atomic = { version = "1", default-features = false, features = ["critic
 # Async executor. `platform-spin` = busy-wait park (no cortex-m/WFI arch needed),
 # which suits Phase 1's poll loop (live IRQ wakeups gated on the MMU sub-phase).
 embassy-executor = { version = "0.10", default-features = false, features = ["executor-thread", "platform-spin"] }
-embassy-futures = "0.1"
 static_cell = "2"
+
+# Async time: `Timer::after`, `Instant`, `Duration`. We implement the hardware
+# Driver (src/time_driver.rs) over the 64-bit monotonic counter + Wallace tick.
+# tick-hz-1_000_000 matches timer::TIMER_HZ so embassy ticks == counter ticks.
+embassy-time = { version = "0.4", default-features = false, features = ["tick-hz-1_000_000"] }
+embassy-time-driver = "0.2"
+
+# RNG trait surface (traits only, no_std) so our CSPRNG plugs into the rand /
+# rustls ecosystems. The CSPRNG + entropy pool itself is hand-rolled (src/rng.rs
+# + src/chacha.rs) — no ppv-lite86/SIMD deps that fight ARMv5.
+rand_core = { version = "0.6", default-features = false }
+
+# Global allocator over a DDR heap region (linker-reserved, src/heap.rs). Uses
+# our critical-section impl for locking. alloc unblocks the TLS session state
+# machine + the alloc-using management services.
+embedded-alloc = "0.6"
+
+# TLS 1.3 crypto primitives (RustCrypto, no_std, no_alloc). Vetted impls — safer
+# than hand-rolling AEAD/hash. TLS_CHACHA20_POLY1305_SHA256 is the target suite
+# (ChaCha20 beats AES in software on a core with no AES instructions, docs/32).
+chacha20poly1305 = { version = "0.10", default-features = false }
+sha2 = { version = "0.10", default-features = false }
+hkdf = { version = "0.12", default-features = false }
+hmac = { version = "0.12", default-features = false }
+# X25519 ECDHE key exchange. curve25519-dalek picks a 32-bit serial backend here.
+x25519-dalek = { version = "2", default-features = false, features = ["static_secrets"] }
+
+# Ed25519 signatures (CertificateVerify + client-cert verify). Same curve25519-dalek
+# 4.x backend as x25519-dalek above (fiat u32, no SIMD/NEON — correct for ARMv5).
+# "alloc" enables SigningKey/VerifyingKey on top of the no_std core.
+ed25519-dalek = { version = "2", default-features = false, features = ["alloc"] }
+
+
+# TCP/IP stack (no_std, no alloc). Drives the GXE MAC via a phy::Device seam
+# (src/net.rs) — the MAC TX/RX DMA ring is HW-gated (docs/11), so the ring is a
+# stub the networking stack sits on top of, ready for the real datapath.
+smoltcp = { version = "0.12", default-features = false, features = [
+    "medium-ethernet", "proto-ipv4", "proto-dhcpv4",
+    "socket-dhcpv4", "socket-udp", "socket-tcp", "alloc", "async",
+] }
+# Generic (heapless Vec) timer queue, cap 16 — standalone, so it does NOT couple
+# to the embassy-executor version (the integrated queue would pin a specific one).
+embassy-time-queue-utils = { version = "0.1", default-features = false, features = ["generic-queue-16"] }
+
+# async no_std HTTP server (Phase 5 web UI). Crypto-agnostic — fed a plaintext
+# async stream by our TLS layer (src/tls_handshake.rs). Generic constructor
+# Server::custom + serve(), so the embassy/embassy-net features stay off (we use
+# smoltcp, not embassy-net).
+picoserve = { version = "0.20", default-features = false, features = ["alloc"] }
+# Async byte-stream traits for the smoltcp socket + TLS-stream adapters.
+embedded-io = "0.7"
+embedded-io-async = "0.7"
