@@ -196,14 +196,13 @@ impl picoserve::io::Socket<WebRuntime> for TlsSocket {
 
 /// Serve HTTP over an already-connected TLS stream.
 pub async fn serve_connection(stream: Tls) {
-    static mut HTTP_BUFFER: [u8; 2048] = [0; 2048];
-
     let app = App.build_app();
     let config = picoserve::Config::new(Default::default());
-    // SAFETY: single-threaded; the buffer is not accessed elsewhere.
-    let http_buffer = unsafe { &mut *core::ptr::addr_of_mut!(HTTP_BUFFER) };
+    // Per-connection heap buffer — no shared `static mut` (safe if serve ever
+    // runs concurrently; we have a global allocator).
+    let mut http_buffer = alloc::vec![0u8; 2048];
 
-    let server = picoserve::Server::custom(&app, WebTimer, &config, http_buffer);
+    let server = picoserve::Server::custom(&app, WebTimer, &config, &mut http_buffer[..]);
     let socket = TlsSocket(Rc::new(RefCell::new(stream)));
     let _ = server.serve(socket).await;
 }

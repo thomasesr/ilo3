@@ -178,8 +178,9 @@ fn parse_is_ca(ext_explicit: &[u8]) -> bool {
     false
 }
 
-/// Walk the TBSCertificate to locate issuer, subject, SPKI, CA flag, validity.
-fn parse_tbs(tbs_der: &[u8]) -> Option<(&[u8], &[u8], &[u8], bool, i64, i64)> {
+/// Walk the TBSCertificate to locate the inner signature-alg OID, issuer,
+/// subject, SPKI, CA flag, and validity.
+fn parse_tbs(tbs_der: &[u8]) -> Option<(&[u8], &[u8], &[u8], &[u8], bool, i64, i64)> {
     let mut rest = tbs_der;
     // optional [0] EXPLICIT version
     if rest.first() == Some(&0xA0) {
@@ -191,11 +192,12 @@ fn parse_tbs(tbs_der: &[u8]) -> Option<(&[u8], &[u8], &[u8], bool, i64, i64)> {
         return None;
     }
     rest = r;
-    // signature AlgorithmIdentifier
-    let (t, _, r) = read_tlv(rest)?;
+    // signature AlgorithmIdentifier — capture its OID for the outer/inner match.
+    let (t, inner_alg, r) = read_tlv(rest)?;
     if t != 0x30 {
         return None;
     }
+    let inner_sig_oid = alg_oid(inner_alg)?;
     rest = r;
     // issuer Name
     let (t, issuer, r) = read_tlv(rest)?;
@@ -235,7 +237,7 @@ fn parse_tbs(tbs_der: &[u8]) -> Option<(&[u8], &[u8], &[u8], bool, i64, i64)> {
             _ => break,
         }
     }
-    Some((issuer, subject, spki, is_ca, not_before, not_after))
+    Some((inner_sig_oid, issuer, subject, spki, is_ca, not_before, not_after))
 }
 
 /// Parse a full DER Certificate into a borrowed `Cert`.
@@ -263,7 +265,12 @@ pub fn parse_cert(der: &[u8]) -> Option<Cert<'_>> {
         _ => SigAlgo::Other,
     };
     let (_, sig) = sig_bits.split_first()?; // skip unused-bits count byte
-    let (issuer, subject, spki, is_ca, not_before, not_after) = parse_tbs(tbs_content)?;
+    let (inner_oid, issuer, subject, spki, is_ca, not_before, not_after) = parse_tbs(tbs_content)?;
+    // RFC 5280 §4.1.1.2: the inner TBS signature alg MUST equal the outer
+    // signatureAlgorithm (reject algorithm-substitution mismatches).
+    if alg_oid(sig_algo_body) != Some(inner_oid) {
+        return None;
+    }
     Some(Cert { tbs_der: tbs_full, sig_algo, sig, issuer, subject, spki, is_ca, not_before, not_after })
 }
 

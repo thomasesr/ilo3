@@ -50,6 +50,19 @@ fn u16be(b: [u8; 2]) -> u16 {
     u16::from_be_bytes(b)
 }
 
+/// Constant-time byte-slice equality (for MAC/Finished comparison). The length
+/// check is fine to leak — MAC lengths are fixed and public.
+fn ct_eq(a: &[u8], b: &[u8]) -> bool {
+    if a.len() != b.len() {
+        return false;
+    }
+    let mut diff = 0u8;
+    for (x, y) in a.iter().zip(b) {
+        diff |= x ^ y;
+    }
+    diff == 0
+}
+
 /// Which client authentication message we are waiting for next.
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum RxPhase {
@@ -481,7 +494,8 @@ impl<'a> ServerHandshake<'a> {
                     let Some(fin_msg) = self.take_buffered(HS_FINISHED) else { return Ok(false) };
                     // Finished MAC is over the transcript *excluding* Finished.
                     let expected = tls13::finished_mac(&hs_keys.finished_key, &self.ks.transcript_hash());
-                    if fin_msg.get(4..) != Some(&expected[..]) {
+                    let got = fin_msg.get(4..).ok_or(())?;
+                    if !ct_eq(got, &expected) {
                         return Err(());
                     }
                     self.ks.update_transcript(&fin_msg);

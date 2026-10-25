@@ -19,6 +19,10 @@ use crate::tls_handshake::ServerHandshake;
 /// ciphertext/tag/inner-type overhead).
 const MAX_PLAINTEXT: usize = 16 * 1024 - 16 - 1;
 
+/// TLS 1.3 max ciphertext record length (RFC 8446 §5.2): 2^14 + 256. Reject
+/// anything larger instead of allocating up to the 16-bit length field (64 KB).
+const MAX_RECORD: usize = (1 << 14) + 256;
+
 #[derive(Debug)]
 pub enum TlsStreamError {
     Io,
@@ -52,18 +56,22 @@ async fn read_exact<S: Read>(s: &mut S, buf: &mut [u8]) -> Result<bool, S::Error
     Ok(true)
 }
 
-/// Read one TLS record (header + fragment); returns None on clean EOF.
-async fn read_record<S: Read>(s: &mut S) -> Result<Option<(u8, Vec<u8>)>, S::Error> {
+/// Read one TLS record (header + fragment); returns None on clean EOF, Err on an
+/// I/O error or an over-length record (> MAX_RECORD).
+async fn read_record<S: Read>(s: &mut S) -> Result<Option<(u8, Vec<u8>)>, TlsStreamError> {
     let mut hdr = [0u8; 5];
-    if !read_exact(s, &mut hdr).await? {
+    if !read_exact(s, &mut hdr).await.map_err(|_| TlsStreamError::Io)? {
         return Ok(None);
     }
     let rtype = hdr[0];
     let len = ((hdr[3] as usize) << 8) | hdr[4] as usize;
+    if len > MAX_RECORD {
+        return Err(TlsStreamError::Tls);
+    }
     let mut full = Vec::with_capacity(5 + len);
     full.extend_from_slice(&hdr);
     full.resize(5 + len, 0);
-    if !read_exact(s, &mut full[5..]).await? {
+    if !read_exact(s, &mut full[5..]).await.map_err(|_| TlsStreamError::Io)? {
         return Ok(None);
     }
     Ok(Some((rtype, full)))
@@ -96,10 +104,7 @@ impl<'a, S: Read + Write> TlsStream<'a, S> {
         mut hs: ServerHandshake<'a>,
     ) -> Result<Self, TlsStreamError> {
         // 1. ClientHello (plaintext handshake record).
-        let (rtype, rec) = read_record(&mut inner)
-            .await
-            .map_err(|_| TlsStreamError::Io)?
-            .ok_or(TlsStreamError::Tls)?;
+        let (rtype, rec) = read_record(&mut inner).await?.ok_or(TlsStreamError::Tls)?;
         if rtype != 22 {
             return Err(TlsStreamError::Tls);
         }
@@ -145,7 +150,7 @@ impl<S: Read + Write> Read for TlsStream<'_, S> {
     async fn read(&mut self, buf: &mut [u8]) -> Result<usize, Self::Error> {
         if self.rx_pos >= self.rx_buf.len() {
             loop {
-                let rec = read_record(&mut self.inner).await.map_err(|_| TlsStreamError::Io)?;
+                let rec = read_record(&mut self.inner).await?;
                 let Some((rtype, rec)) = rec else {
                     return Ok(0); // EOF
                 };
