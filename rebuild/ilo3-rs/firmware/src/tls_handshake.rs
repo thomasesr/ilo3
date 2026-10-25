@@ -489,7 +489,11 @@ impl<'a> ServerHandshake<'a> {
                     if !self.anchors.is_empty() {
                         let der_refs: Vec<&[u8]> =
                             self.pending_chain.iter().map(|c| c.as_slice()).collect();
-                        if !x509::verify_chain(&der_refs, self.anchors) {
+                        // now_unix = None: no trusted wall-clock yet (RTC is a
+                        // software clock seeded from NTP, docs/18). Validity is
+                        // enforced once a time source is wired; the CA-flag +
+                        // signature checks are always enforced.
+                        if !x509::verify_chain(&der_refs, self.anchors, None) {
                             return Err(());
                         }
                     }

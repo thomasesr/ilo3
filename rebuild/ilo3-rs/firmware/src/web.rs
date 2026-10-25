@@ -7,6 +7,7 @@
 
 #![allow(dead_code)]
 
+use alloc::boxed::Box;
 use alloc::format;
 use alloc::rc::Rc;
 use alloc::string::String;
@@ -21,11 +22,13 @@ use picoserve::time::Timer;
 use crate::tcp::{self, TcpStream};
 use crate::tls_handshake::ServerHandshake;
 use crate::tls_stream::{TlsStream, TlsStreamError};
+use crate::uart::Uart;
+use crate::{certstore, x509};
 
-/// Placeholder server identity — real cert/key come from the cert store (flash).
-static CERT: &[u8] = &[];
+/// Trust anchors for optional mTLS client-cert auth. Empty = server-auth only
+/// (browsers present no client cert); populate from a flash anchor store to
+/// require + verify client certs. Must be CA certs (x509::verify_chain enforces).
 static ANCHORS: &[&[u8]] = &[];
-const SIGNING_SEED: [u8; 32] = [0; 32];
 
 /// picoserve async-runtime marker.
 pub struct WebRuntime;
@@ -209,19 +212,37 @@ pub async fn serve_connection(stream: Tls) {
 /// MAC ring (docs/11) is pinned — real traffic then flows unchanged.
 #[embassy_executor::task]
 pub async fn web_task() {
+    let con = Uart::console();
+
+    // Fail closed: never run the TLS server with a placeholder/zero key. Load the
+    // server identity (cert + Ed25519 key) from the flash cert store; if none is
+    // provisioned, disable HTTPS rather than serve with an insecure key.
+    let Some(store) = certstore::CertStore::load_from_flash() else {
+        con.write_bytes(b"[web] no TLS cert provisioned - HTTPS server disabled\n");
+        return;
+    };
+    let Some(seed) = x509::ed25519_seed_from_pkcs8(&store.key_der) else {
+        con.write_bytes(b"[web] cert store key invalid - HTTPS server disabled\n");
+        return;
+    };
+    // Leak the cert DER to 'static: a one-time boot identity that lives for the
+    // whole run (ServerHandshake borrows it for each connection).
+    let cert: &'static [u8] = Box::leak(store.cert_der.into_boxed_slice());
+
     let listener = tcp::add_tcp();
     tcp::with_sockets(|s| {
         use smoltcp::socket::tcp::Socket as TcpSocket;
         let sock = s.get_mut::<TcpSocket>(listener);
         let _ = sock.listen(443);
     });
+    con.write_bytes(b"[web] HTTPS server listening on :443\n");
 
     loop {
         let conn = tcp::accept(listener).await;
         let stream = TcpStream::new(conn);
 
         let (eph, _) = crate::crypto::x25519_keypair();
-        let hs = ServerHandshake::new(CERT, &SIGNING_SEED, ANCHORS, eph);
+        let hs = ServerHandshake::new(cert, &seed, ANCHORS, eph);
 
         match TlsStream::handshake(stream, hs).await {
             Ok(tls) => serve_connection(tls).await,
