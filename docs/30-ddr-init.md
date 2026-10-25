@@ -156,3 +156,56 @@ Phase 2: `0x20=0x2, 0x80200040=0x400` · term `0`. Then MEMCFG `0xC0000064 = str
   1 Gbit/128 MB (MEMCFG-strap-derived, docs/13) — the "32 MB DT placeholder" is just a floor.
 - **Pre-DDR scratch = ISSI IS62WV2568BLL async SRAM** at `0x20000000` — this is why the boot
   ROM / SPL can use stack `0x20004000` before DRAM is trained (docs/13, docs/31 open item resolved).
+
+## Cross-check vs LPDDR2-S4 (JESD209-2) — 2026-10-21
+
+The fitted part is 1 Gbit LPDDR2-S4 (ISSI IS43/46LD16640A, docs/13). Cross-checking the RE'd
+`0x7f1a0c` table against JESD209-2. The registers are Gromit-XE **controller** registers (packed
+fields; the full layout needs the controller datasheet), but several decode cleanly and the whole
+sequence maps onto the LPDDR2 power-up flow. `spl/src/ddr.rs` byte-matches this table (re-verified).
+
+### Mode-register decodes (strong — match JESD209-2 exactly)
+
+- **`0xC0000024 = 0x22` ≈ MR1 (Device Feature 1)**: `0b0010_0010` → BL[2:0]=`010`=**BL4**,
+  BT[3]=0 (sequential), nWR[6:4]=`010`=**nWR4**. (docs/30 label "timing" → refine to MR1.)
+- **`0xC0000034 = 0x5` ≈ MR2 (Device Feature 2)**: `0b0101` → **RL7 / WL4**, i.e. the LPDDR2
+  read/write-latency set for the **400–466 MHz** clock bin (LPDDR2-800/933). (label "mode" → MR2.)
+- RL7/WL4 pins the operating point: DDR clock ≈ 400–466 MHz (800–933 MT/s), consistent with the
+  `0xC0000064` MEMCFG = `min(cfg, clock>>1)` coupling (docs/30 clock section).
+
+These are likely the MR values the controller issues via MRW during the start kick (LPDDR2 needs
+MRW to MR1/MR2/MR3 + ZQ-cal MR10 at init). HYPOTHESIS: the controller reg may re-encode rather than
+pass the raw MR byte — CONFIRM-ON-HW — but the bit-exact JESD209-2 match is compelling.
+
+### Sequence vs JESD209-2 §3.3.1 power-up — structurally matches
+
+1. **Vdd-stable delay** (timer ≥ `0x1F4`=500 ticks) → JESD209-2 `tINIT1..3` require **≥ 200 µs**
+   after Vdd stable before CKE/RESET. ⚠ **SAFETY CHECK**: 500 ticks must be ≥ 200 µs at the real
+   counter rate. At the TIMER_HZ placeholder (1 MHz) = 500 µs ✓; re-confirm once the rate is known.
+2. **Controller config** (the timing words + MR1/MR2) loaded, then `0xC0000020 = 0x3` **start** →
+   the controller runs the LPDDR2 init (RESET via MR63, ZQ Init Cal via MR10 `tZQINIT ≥ 1 µs`, MRW
+   MR1/2/3). This is why there is **no explicit MR10/MRW in the table** — the controller auto-issues
+   them on start.
+3. **Poll `0xC0000020` bit7 = ready** → this is **ZQ-cal + PHY training complete**, NOT "DLL lock":
+   **LPDDR2 is DLL-less**. (Correct the docs/03/ddr.rs "DLL lock" wording.)
+4. Post-cal `0xC0000020 = 0x2`, then `0x80200040 = 0x400`, then MEMCFG = strap>>1.
+
+### Timing words + refresh (bounded, not fully decoded)
+
+- `0xC0000028 = 0x552C9180`, `0xC000002C = 0x50C34F`, `0xC0000040 = 0xAA9658E3` = packed
+  tRCD/tRP/tRAS/tRC/tRFCab/tFAW etc. for 1 Gbit LPDDR2-S4. Exact field split needs the controller
+  datasheet (standing Open), but at RL7/WL4 the required timings (tRCD/tRP ≈ 18 ns, tRAS ≈ 42 ns,
+  tRFCab ≈ 130 ns for 1 Gbit, tFAW) are all in-range and representable in these 32-bit words.
+- `0xC0000048 = 0x7D` (125) = refresh interval count. LPDDR2-S4 **tREFIab = 3.9 µs** (≤ 85 °C;
+  1.95 µs above 85 °C). Verify `125 × tCK_ctrl ≤ 3.9 µs` at the real controller clock (CONFIRM-ON-HW).
+- `0xC0000018 = 0xFDF0FFF0` = row/col/bank address mask for a 1 Gbit ×16 device (8 banks, 14 row,
+  10 col); exact mapping needs the controller datasheet.
+
+### Verdict
+
+The table is a **valid LPDDR2-S4 init for a 1 Gbit ×16 device at RL7/WL4 (~400–466 MHz)** — the
+MR1/MR2 decodes are bit-exact against JESD209-2, and the sequence matches the power-up flow. Since
+the values are RE'd from the shipping ROM that boots this exact RAM, they are correct by
+construction; this cross-check validates the *port* (`ddr.rs` matches) + the *understanding* (it's
+LPDDR2, DLL-less, ~400–466 MHz). Remaining HW-confirms: the ≥200 µs power delay vs the real counter
+rate, the tREFI math, and the packed timing/mask field layout (controller datasheet).

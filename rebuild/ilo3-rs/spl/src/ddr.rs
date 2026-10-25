@@ -13,7 +13,8 @@
 //!   1. warm check: 0xC0000020 bit7 set → DRAM already up, skip.
 //!   2. power-stable delay: wait until timer 0xC0000098 counts >= 500 (0x1F4).
 //!   3. phase 1: walk the table (timing/mode regs, ending with 0xC0000020 = 0x3).
-//!   4. calibration wait: poll 0xC0000020 until bit7 (PHY cal / DLL lock) set.
+//!   4. calibration wait: poll 0xC0000020 until bit7 set = ZQ-cal + PHY training
+//!      complete (LPDDR2 is DLL-less — not "DLL lock"; docs/30 cross-check).
 //!   5. phase 2: 0xC0000020 = 0x2, then 0x80200040 = 0x400.
 //!   6. MEMCFG: 0xC0000064 = strap(0x801F00A4) >> 1. DRAM usable.
 //!
@@ -42,14 +43,14 @@ const CAL_BUDGET: u32 = 0x0100_0000;
 /// XIP), readable pre-DDR. Terminates with the MEMCTL=0x3 start kick.
 const PHASE1: &[(u32, u32)] = &[
     (0xC000_0030, 0x0000_1520),
-    (0xC000_0034, 0x0000_0005),
+    (0xC000_0034, 0x0000_0005), // ≈ LPDDR2 MR2: RL7/WL4 (~400-466 MHz; docs/30)
     (0xC000_0038, 0x0000_0000),
     (0xC000_003C, 0x0000_0000),
     (0xC000_0028, 0x552C_9180),
     (0xC000_002C, 0x0050_C34F),
     (0xC000_0040, 0xAA96_58E3),
     (0xC000_0048, 0x0000_007D),
-    (0xC000_0024, 0x0000_0022),
+    (0xC000_0024, 0x0000_0022), // ≈ LPDDR2 MR1: BL4, nWR4 (JESD209-2; docs/30)
     (0xC000_0018, 0xFDF0_FFF0),
     (0xC000_0020, 0x0000_0003), // start
 ];
@@ -80,6 +81,8 @@ pub fn init() -> Status {
         }
 
         // 2. Power-stable delay: spin until the free-running timer passes 500.
+        // JESD209-2 tINIT requires >= 200 us after Vdd stable before init; 500
+        // ticks must exceed that at the real counter rate (CONFIRM-ON-HW; docs/30).
         while read_volatile(TIMER_LO) < 0x1F4 {}
 
         // 3. Phase 1: load timing/mode regs; the final entry kicks the controller.
