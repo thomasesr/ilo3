@@ -38,6 +38,7 @@ OPTIONS:
   --db-bar <path>   doorbell BAR (default: resource1 beside --bar)
   --db-off <hex>    doorbell register offset  -> enables ringing (CONFIRM-ON-HW)
   --db-val <hex>    doorbell value (default 1<<REQ_CCB)
+  --timeout <secs>  recover: wait for the SPL window (default 300; AC-cycle safe)
 
 Run as root. Free the region first if hpilo holds it:
   echo <bdf> > /sys/bus/pci/drivers/hpilo/unbind";
@@ -52,6 +53,7 @@ struct Opts {
     db_bar: Option<String>,
     db_off: Option<usize>,
     db_val: Option<u32>,
+    timeout: Option<u64>,
 }
 
 fn hex(s: &str) -> u32 {
@@ -66,7 +68,7 @@ fn parse() -> Option<Opts> {
     }
     let mut o = Opts {
         mode, rest: vec![], bar: None, pci: None, base: None,
-        image: None, db_bar: None, db_off: None, db_val: None,
+        image: None, db_bar: None, db_off: None, db_val: None, timeout: None,
     };
     while let Some(t) = a.next() {
         match t.as_str() {
@@ -77,6 +79,7 @@ fn parse() -> Option<Opts> {
             "--db-bar" => o.db_bar = a.next(),
             "--db-off" => o.db_off = a.next().map(|v| hex(&v) as usize),
             "--db-val" => o.db_val = a.next().map(|v| hex(&v)),
+            "--timeout" => o.timeout = a.next().and_then(|v| v.parse().ok()),
             _ => o.rest.push(t),
         }
     }
@@ -156,7 +159,11 @@ fn main() {
             let img = o.image.or_else(|| o.rest.first().cloned());
             match img {
                 Some(i) => {
-                    recover::recover(&bar, &i, Duration::from_secs(90));
+                    // Default 300s to cover an AC-cycle: the host can take minutes
+                    // to POST before it can drive the SPL recovery window (which now
+                    // waits ~minutes too). --timeout overrides. (REVIEW.md blocker 5.)
+                    let secs = o.timeout.unwrap_or(300);
+                    recover::recover(&bar, &i, Duration::from_secs(secs));
                 }
                 None => eprintln!("recover needs --image <main.bin>"),
             }
