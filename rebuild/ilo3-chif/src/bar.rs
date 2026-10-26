@@ -24,12 +24,7 @@ impl Bar {
         if fd < 0 {
             return Err(io::Error::last_os_error());
         }
-        let mut st: libc::stat = unsafe { std::mem::zeroed() };
-        let len = if unsafe { libc::fstat(fd, &mut st) } == 0 && st.st_size > 0 {
-            st.st_size as usize
-        } else {
-            0x10_0000 // 1 MB fallback (CHIF BAR2 window)
-        };
+        let len = bar_size(path, fd);
         // SAFETY: fd is a valid, writable file; len > 0.
         let p = unsafe {
             libc::mmap(
@@ -105,4 +100,32 @@ impl Drop for Bar {
             libc::close(self.fd);
         }
     }
+}
+
+/// Determine the BAR size to mmap. `fstat` on a PCI `resourceN` file returns the
+/// real size on current kernels, but some report 0 — then the 1 MB default would
+/// fail `mmap` on a window that enumerated small (e.g. 4 KB), breaking the first-
+/// 4KB recovery fallback. So prefer the authoritative `resource` table, fall back
+/// to fstat, then a 1 MB default. (REVIEW.md blocker 1.)
+fn bar_size(path: &Path, fd: libc::c_int) -> usize {
+    if let Some(sz) = size_from_resource_table(path) {
+        return sz;
+    }
+    let mut st: libc::stat = unsafe { std::mem::zeroed() };
+    if unsafe { libc::fstat(fd, &mut st) } == 0 && st.st_size > 0 {
+        return st.st_size as usize;
+    }
+    0x10_0000 // 1 MB default (CHIF window)
+}
+
+/// Parse the BAR's size from the sibling `resource` table: one `start end flags`
+/// line per BAR; size = end - start + 1. Returns None for a non-`resourceN` path
+/// (e.g. a plain test file), so fstat handles those.
+fn size_from_resource_table(path: &Path) -> Option<usize> {
+    let n: usize = path.file_name()?.to_str()?.strip_prefix("resource")?.parse().ok()?;
+    let text = std::fs::read_to_string(path.with_file_name("resource")).ok()?;
+    let mut it = text.lines().nth(n)?.split_whitespace();
+    let start = u64::from_str_radix(it.next()?.trim_start_matches("0x"), 16).ok()?;
+    let end = u64::from_str_radix(it.next()?.trim_start_matches("0x"), 16).ok()?;
+    (end > start).then_some((end - start + 1) as usize)
 }
