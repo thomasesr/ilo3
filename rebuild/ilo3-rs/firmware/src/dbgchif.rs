@@ -152,29 +152,12 @@ fn handle(req: &[u8]) -> Vec<u8> {
     }
 }
 
-/// Soft-reset: mask interrupts, turn the MMU + caches off, jump to the flash reset
-/// vector (0xFFFF0000 is flash when the MMU is off) to re-run the boot chain and
-/// load the freshly-flashed payload. A clean path is an AC power-cycle; this just
-/// saves the manual step. CONFIRM-ON-HW: a true SoC/WDT reset would be cleaner.
+/// Soft-reset to re-run the boot chain and load the freshly-flashed payload. A
+/// clean path is an AC power-cycle; this just saves the manual step. Shared with
+/// the UID-button reset (src/reset.rs, src/uidreset.rs).
 fn reboot() -> ! {
-    // noreturn forbids output operands, so r1 is a hardcoded scratch (clobber is
-    // irrelevant — we never come back); r0 carries the flash reset vector.
-    unsafe {
-        core::arch::asm!(
-            "mrs r1, cpsr",
-            "orr r1, r1, #0xC0",          // mask IRQ + FIQ
-            "msr cpsr_c, r1",
-            "mrc p15, 0, r1, c1, c0, 0",
-            "bic r1, r1, #0x5",           // MMU (M) + D-cache (C) off
-            "bic r1, r1, #0x1000",        // I-cache (I) off
-            "mcr p15, 0, r1, c1, c0, 0",
-            "mov r1, #0",
-            "mcr p15, 0, r1, c7, c7, 0",  // invalidate I+D cache
-            "bx r0",                      // -> flash reset vector
-            in("r0") 0xFFFF_0000u32,
-            options(noreturn),
-        )
-    }
+    // SAFETY: CMD_REBOOT is the explicit request to tear down and restart.
+    unsafe { crate::reset::soft_reset() }
 }
 
 /// The CHIF debug service task. Owns its own CHIF instance for bring-up (the
@@ -183,11 +166,13 @@ fn reboot() -> ! {
 #[embassy_executor::task]
 pub async fn dbgchif_task() {
     let mut chif = Chif::new();
-    chif.init(0x4000_0000, 20); // 1 MB window — CONFIRM-ON-HW
+    chif.init(); // 1 MB window; BAR size encoded per HP (docs/28 §10)
     let _ = chif.open_channel(DBG_CH);
     let mut rx = [0u8; 0x4000];
     loop {
-        if let Some(msg) = chif.poll_rx(&mut rx) {
+        // Doorbell-FREE: scan CCB ownership so the host tool drives reflash with
+        // only a working BAR window (no BAR3 doorbell needed; see chif.rs).
+        if let Some(msg) = chif.poll_rx_polled(&mut rx) {
             if msg.channel == DBG_CH {
                 let out = handle(&rx[..msg.len]);
                 chif.send(DBG_CH, msg.ccb, &out);

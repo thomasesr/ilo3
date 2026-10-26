@@ -127,3 +127,139 @@ existing phosphor services) — gets remote management working; (3) vMedia; (4) 
 - ~~Exact channel-id numbering per service~~ **RESOLVED**: host-assigned (descriptor `+0x28`), dynamic; BMC reserves `0xFFFE` (echo) / `0xFFFF` (free). Per-service numbering = host hpilo convention.
 - Message-type semantics beyond `0x18`/`0x19`/`0x1A`.
 - Whether the BMC can use the host-interface IRQ or must poll (docs/12 host-interface line).
+
+## 8. Host-side tool (`rebuild/ilo3-chif/`)
+
+Compiled host CHIF client for the XCP-ng 8.3 (x86_64) host — debug console +
+host-side SPI reflash over PCI, the bring-up counterpart of
+`firmware/src/dbgchif.rs`. Static-musl binary (dom0 has no guaranteed python3).
+Supersedes the python reference `ilo3-rs/tools/ilo3-chif-console.py` (kept in sync).
+
+- Maps the `.2` BAR2 (1 MB CHIF shared-mem window, §2); auto-finds `103c:3307`.
+- Debug channel `0xDB90`; message framing = §3 (`+0x00` len, `+0x06` chan, `+0x08`
+  payload) + the 14-byte sum-to-zero header @ `shmem+0x4000`.
+- `flash`/`verify`/`recover` = host reflash + SPL RAM-boot; SPL region `>=0x7f0000`
+  is firmware-write-protected, a full image is auto-clipped to the payload.
+
+**Ownership handshake polarity (corrected).** Request + response share one CCB; the
+bit31 ring-control baton: host sets it (BMC owns), the BMC writes the response and
+**clears** it (host owns again = response ready) — net behaviour of `dbgchif_task`
+(`send()` sets, `rx_release()` clears). The host therefore waits for the bit to go
+**clear**, not re-set. (The original python polarity waited for a re-set — fixed in
+both tools.)
+
+**Doorbell (still CONFIRM-ON-HW).** The host→BMC doorbell (`0x01F03004` bit2 on the
+BMC) is raised from a register in a small `.2` BAR; exact BAR/offset/value not yet
+pinned (oracle: `hpilo.c` `hpilo_db_outbound`). Tool takes `--db-bar/--db-off/
+--db-val`; `observe` and an ownership-polling firmware work without it.
+
+## 9. HARDWARE-CONFIRMED protocol (live DL380p G7, 2026-10-25) — hpilo oracle + lspci
+
+First power-on of a host-reflashed board. `lspci` + `drivers/misc/hpilo.c` (v4.19)
++ live BAR reads give the REAL host-side protocol. **This overturns parts of §2-§3.**
+
+**BAR map of `.2` (103c:3307, subsystem 103c:3309), confirmed on hardware:**
+| BAR | addr/size (this board) | role (hpilo `ilo_map_device`) |
+|-----|------------------------|-------------------------------|
+| 0 (I/O) | `0x3800`/256 | I/O ports |
+| 1 (mem) | `f1fe0000`/**256** | **MMIO regs** = BMC host-iface block (`0x01F02000`). `DB_IRQ`@`+0xB2`, `DB_OUT`@`+0xD4`. Live: `+0x50`=1, `+0x54`=0xf800000c, `+0xD0`=0x0200ffff. |
+| 2 (mem) | `f1fd0000`/**4K** | **shared memory / CCBs** (bar=2 unless subsystem==0x00E4→bar=5) |
+| 3 (mem) | `f1f00000`/**512K** | **per-CCB doorbell aperture**, stride `ONE_DB_SIZE`=`1<<14`=0x4000 |
+| 4,5 | 32K each | — |
+
+**Doorbell (host→BMC), CONFIRMED — resolves the §8 CONFIRM-ON-HW item:**
+- Per channel: `iowrite8(1, BAR3 + channel*0x4000)` to notify; `iowrite8(2, …)` clears.
+- Global `DB_OUT` = `BAR1 + 0xD4` (write bit `DB_RESET`=26 region); `DB_IRQ`=`BAR1+0xB2`.
+- i.e. the host rings via the **BAR3 aperture byte-write**, NOT a single reg; the BMC side
+  surfaces it (our RE's `0x01F03004` bit2 is the BMC view).
+
+**CCB = 128 B hardware (`ILOHW_CCB_SZ`), 64 B software. Field offsets (CONFIRMED):**
+`send_fifobar`@0x00, `send_desc`@0x08, `send_ctrl`@0x10, `recv_fifobar`@0x18,
+`recv_desc`@0x20, `recv_ctrl`@0x28, `db_base`@0x30, `channel`@0x38.
+
+**Transport = FIFO + descriptor rings, NOT a single ownership-bit CCB:**
+`NR_QENTRY`=4 per fifo; entry bitfields `QWORDS`@0, `DESCRIPTOR`@10, `C`@22, **`O`(owner)@23**.
+`SENDQ`=1/`RECVQ`=2. `fifo` handle + `desc_mem` (8-byte entries, `L2_QENTRY_SZ`=12).
+`Open could not dequeue a packet` = hpilo put a pkt on SENDQ, rang the doorbell, BMC never
+dequeued (MAX_WAIT_TIME=10000us).
+
+### Impact on our firmware (ACTION)
+Our `chif.rs`/`dbgchif.rs`/`recovery.rs` model (1 MB window @0x40000000; 0x80-stride CCB;
+ownership **bit31**; regions at 0x4000/0x8000/0xC000) **does not match hardware**: the real
+shared BAR is **4 KB** (BAR2), the doorbell is the **BAR3 aperture**, ownership is **bit23** of
+descriptor entries, and framing is **send/recv FIFOs + descriptor rings**. Offsets like
+`req@0xC000` don't exist in a 4 KB BAR. Consequences:
+- Host↔BMC CHIF (incl. our tool's debug channel + host reflash + SPL recovery mailbox) cannot
+  work as flashed — all assume the wrong window/CCB/doorbell.
+- **Rework** chif/dbgchif/recovery to the hpilo FIFO/descriptor/doorbell model above, then
+  reflash. The recovery mailbox fits in the 4 KB BAR2 (escape hatch to avoid re-soldering —
+  IF the already-flashed SPL exposes it correctly; otherwise SPI programmer).
+- Liveness of `main`/DDR is still unconfirmed remotely — use the UID-LED boot trace (docs/08)
+  and iLO NIC/DHCP presence (model-independent), since no CHIF path is trustworthy yet.
+
+## 10. HP's ACTUAL window-open, decompiled (ilo3_194.bin @ 0x14fc40) — ROOT CAUSE
+
+Decompiled HP's CHIF init (the fn whose literal pool holds BAR_REG/CTRL0/CTRL1/
+shmem-base/chan-desc, pool @0x14fed8-0x14ff04). This is clean-room ground truth
+for the window-open our firmware got wrong.
+
+**Sequence (0x14fc40):**
+1. `bl 0x18e1edc` — INTEGRITY maps a shared-mem region → access base to `[sp,#0xc]`.
+2. `bl 0x18c2570` — region phys **start → `[sp,#0x18]`, end → `[sp,#0x1c]`**.
+3. `*(0x62A54) = base` — BMC-side access base cached (docs/07).
+4. **BAR reg (0x01F02050) computation:**
+   - `size = (end+1) - start`
+   - `size >>= 12` (÷4096), then `r1 = bit_length(size/4096)` (count >>1 to zero)
+   - `base_off = start - 0x40000000`
+   - `*0x01F02050 = base_off | r1`
+5. First `0x1000` of the window = the **32 CCBs** (0x80 each); **data/message region
+   = base + 0x1000**. Control struct @`0x62A58` = {base, base+0x1000, 0x01F020D0,
+   0x01F020D4, 0}.
+6. 10 channel descriptors @`0x62A7C`, stride **0x4C**, `+0x28` = chan id (init `0xFFFF`).
+7. CTRL1 `0x01F020D4 = 0x04000000` (enable); status/ack halfword @`0x01F020B2`
+   (`ldrh [CTRL1-0x22]; tst #1 → write 1`).
+
+**BAR SIZE ENCODING (the bug):** field = `bit_length(size/4096)`, so
+`size = 4096 << (field-1)`. HP's 1 MB window → **field = 9**. The host PCI
+enumerates the BAR at this size (set during iLO boot, before host power/POST).
+
+**OUR FIRMWARE WAS WRONG** (`firmware/src/chif.rs` init):
+`wr32(BAR_REG, (phys-0x40000000) | log2_size)` with `log2_size = 20` → field=20 →
+`size = 4096<<19 = 2 GB` → invalid → **ASIC defaults BAR2 to 4 KB**. This is why the
+live board (docs/28 §9) enumerated BAR2 = 4 KB and every window offset (header
+0x4000 / recovery 0x8000 / req 0xC000) overflowed the host aperture → total host-
+interface failure. **One constant.**
+
+### FIRMWARE FIX (chif.rs + spl)
+- Reserve a **size-aligned** shared region ≥ `0x40000000` in DRAM (1 MB, 1 MB-aligned).
+- `*0x01F02050 = (phys - 0x40000000) | bit_length(size/4096)` (1 MB → `|9`).
+- **Program the BAR size BEFORE host PCI enumeration** — in the SPL / earliest main,
+  before host power is released (iLO gates host power, so this is reachable).
+- Keep layout: CCBs in first 0x1000 (32×0x80), data region at base+0x1000; 10 chan
+  descriptors in BMC RAM (0x4C stride, +0x28 chanid); CTRL0/CTRL1 + 0x020B2 ack.
+- dbgchif/recovery offsets (0x4000/0x8000/0xC000) then fit inside the real window.
+
+### Residual risk + de-risk (post-fix, 2026-10-26)
+The BAR size-field fix (field = `bit_length(size/4096)`) is applied to `chif.rs` +
+`spl/src/recovery.rs`; the SPL programs it before host PCI enumeration; the recovery
+mailbox moved to the window START (first 4 KB) with a long (~minutes) wait for the
+AC-cycle→host-boot timing. The host tool mailbox offset/chunk match.
+
+**Residual unknown:** whether `0x40000000` (the CHIF-shmem window base) is backed by
+our firmware's DRAM. HP's INTEGRITY allocated backed RAM there; our DRAM is decoded
+at `0x20000000` and static RE did not confirm a `0x40000000` alias/aperture. The
+size-field bug alone explains the observed dead BAR (invalid field ⇒ window disabled
+⇒ stub 4 KB, zero + unwritable), so the fix is likely sufficient — but before trusting
+a resolder, add an **SPL self-test**: write/readback a pattern in the `0x40000000`
+window and blink a distinct UID-LED PASS/FAIL code (model-independent, no host channel).
+
+### Doorbell-free debug/reflash channel (2026-10-26)
+`dbgchif` now drives RX via `Chif::poll_rx_polled()` — it scans CCB ownership
+directly, WITHOUT the `0x01F03004` bit2 doorbell gate (`chif.rs`). So the host tool
+can drive the debug channel (incl. host SPI reflash: ferase/fwrite/fread) with only
+a correctly-enumerated BAR window — no BAR3 doorbell needed. `header_ok()`
+(magic+checksum) + `rx_release()` (clears ownership per request) keep it safe from
+re-triggering on a stale header. Mirrors the doorbell-free SPL recovery mailbox.
+Binary-verified: the running firmware contains no `0x01F03004` reference. The
+production `poll_rx` (doorbell-gated, for stock-hpilo interop) remains for the §9
+rewrite but is currently dead-stripped (no live caller).

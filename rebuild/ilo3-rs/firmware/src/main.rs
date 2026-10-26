@@ -38,6 +38,8 @@ mod crypto; // TLS 1.3 crypto primitives + power-on self-test (docs/32)
 mod heap; // global allocator over the DDR heap region
 mod peci; // native PECI engine (CPU temperature)
 mod power; // host power control (on/off/reset/NMI; docs/24)
+mod reset; // iLO self-reset primitive (soft vector reset; docs/49)
+mod uidreset; // UID-button-hold (10s) -> iLO reset monitor (docs/49)
 mod psu; // panda PSU telemetry over I2C (docs/19,20)
 mod rng; // software entropy pool + ChaCha20 CSPRNG (docs/32)
 mod mac; // GXELAN MAC + MDIO (2 NICs; datapath = Phase 3)
@@ -258,6 +260,7 @@ pub extern "C" fn rust_main() -> ! {
         spawner.spawn(net::net_task().unwrap());
         spawner.spawn(web::web_task().unwrap());
         spawner.spawn(kvm::kvm_task().unwrap());
+        spawner.spawn(uidreset::uid_reset_task().unwrap());
     });
 }
 

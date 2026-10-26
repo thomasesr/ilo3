@@ -56,7 +56,7 @@ fn ipmi_over_chif(data: &[u8]) -> Vec<u8> {
 pub async fn chif_task() {
     let mut chif = Chif::new();
     // window_phys / log2(size) come from the platform (host PCI BAR2, docs/28).
-    chif.init(0x4000_0000, 20); // 1 MB window — CONFIRM-ON-HW
+    chif.init(); // 1 MB window; BAR size encoded per HP (docs/28 §10)
     let _ = chif.open_channel(CH_ECHO);
 
     let mut buf = [0u8; 0x4000];
