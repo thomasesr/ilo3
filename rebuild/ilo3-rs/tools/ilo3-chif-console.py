@@ -53,13 +53,13 @@ CMD = {"ping": 1, "drain": 2, "md": 3, "mw": 4, "mb": 5,
 SPL_BASE = 0x7f0000        # write-protected in firmware (recovery boot)
 CHUNK = 4096               # bytes per fwrite / fread (well under the 16 KB region)
 
-# --- SPL recovery mailbox (spl/src/recovery.rs), at window + 0x8000 ---
-REC = 0x8000
+# --- SPL recovery mailbox (spl/src/recovery.rs), at window start (first 4 KB) ---
+REC = 0x0000             # first 4 KB of the window (matches spl/src/recovery.rs)
 REC_MAGIC, REC_REQ, REC_CMD, REC_ADDR = REC+0x00, REC+0x04, REC+0x08, REC+0x0C
 REC_LEN, REC_RESP, REC_STATUS, REC_DATA = REC+0x10, REC+0x14, REC+0x18, REC+0x40
 RCVR = 0x52564352          # "RCVR" little-endian
 RC_WRITE, RC_BOOT, RC_PING = 1, 2, 3
-RC_CHUNK = 0x3000          # mailbox data area (recovery.rs MAX_CHUNK)
+RC_CHUNK = 0xF00           # mailbox data area (recovery.rs MAX_CHUNK; fits 4 KB)
 RAM_LOAD = 0x20000000      # DRAM base: where main's _start runs (= flash load addr)
 
 
@@ -123,16 +123,18 @@ def request(mm, cmd, addr=0, arg=0, data=b"", timeout=5.0):
     put_u32(mm, REQ_CCB * CCB_SIZE + CCB_OFFSET, msg)
     put_u32(mm, REQ_CCB * CCB_SIZE + CCB_OWN, OWN_BIT)  # hand to iLO
     ring_doorbell(mm)
-    # wait for iLO to produce the response on the same CCB
+    # Wait for the BMC to CLEAR ownership = response ready. (Firmware net
+    # behaviour: dbgchif_task send() sets the bit, then rx_release() clears it, so
+    # OWN going back to 0 means the host owns the buffer again — the response is
+    # in place. Matches rebuild/ilo3-chif/src/proto.rs.)
     t0 = time.time()
     while time.time() - t0 < timeout:
         own = struct.unpack_from("<I", mm, REQ_CCB * CCB_SIZE + CCB_OWN)[0]
-        if own & OWN_BIT:  # iLO re-set ownership = response ready
+        if not (own & OWN_BIT):  # iLO cleared ownership = response ready
             roff = struct.unpack_from("<I", mm, REQ_CCB * CCB_SIZE + CCB_OFFSET)[0]
             status = mm[roff + 0x08]
             n = struct.unpack_from("<H", mm, roff + 0x09)[0]
             data = bytes(mm[roff + 0x0b: roff + 0x0b + n])
-            put_u32(mm, REQ_CCB * CCB_SIZE + CCB_OWN, 0)  # release
             return status, data
         time.sleep(0.005)
     return None, b""
