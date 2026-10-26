@@ -19,6 +19,12 @@ recovery = []
 # UID-LED boot trace (src/led.rs): pre-DDR, no-tap progress beacon. Default-on for
 # bring-up; drop for production so the SPL does not touch the UID LED at boot.
 led-trace = []
+# Hold the UID button during boot to force the recovery window to wait INDEFINITELY
+# (vs the bounded budget). DEFAULT-OFF: the UID button register/bit are CONFIRM-ON-HW
+# (src/cpld.rs); a mis-identified, permanently-asserted bit would hang every boot in
+# recovery. Enable ONLY after the bit is pinned live (docs/49). The always-safe
+# runtime path is the main-firmware monitor (firmware/src/uidreset.rs).
+uid-boot-recovery = []
 
 # No dependencies: the SPL is pure no_std + register pokes. It runs XIP from
 # flash at 0xFFFF0000 before DRAM exists, so it must have no .data/.bss touched

@@ -113,3 +113,32 @@ pub fn psu_present(bay: u8) -> bool {
 pub fn psu_enable(bay: u8, on: bool) {
     set_bit(R_PS_ENABLE, bay, on);
 }
+
+// ---- front-panel buttons (CPLD interrupt sources, docs/49) ----
+//
+// The CPLD dispatches 6 interrupt sources over input registers +0x08/+0x09/+0x0D
+// /+0x2D. Power button = +0x08 bit6 (CONFIRMED in HP's handler). The UID button is
+// one of the others; the exact register/bit + polarity are CONFIRM-ON-HW — pin
+// them live once the host debug channel is up: `md 0x01F14008`, `md 0x01F14009`,
+// `md 0x01F1400D`, `md 0x01F1402D`, press/release UID, watch which bit flips, then
+// set the three consts below. Default = best candidate (+0x09 bit2, active-high).
+const R_INPUT_POWER: usize = 0x08;
+const POWER_BTN_BIT: u8 = 6;
+const R_INPUT_UID: usize = 0x09; // CONFIRM-ON-HW
+const UID_BTN_BIT: u8 = 2; // CONFIRM-ON-HW
+const UID_BTN_ACTIVE_HIGH: bool = true; // CONFIRM-ON-HW (flip if pressed reads 0)
+
+/// True while the front-panel UID button is physically pressed (CONFIRM-ON-HW).
+pub fn uid_button_pressed() -> bool {
+    let set = read_bit(R_INPUT_UID, UID_BTN_BIT);
+    if UID_BTN_ACTIVE_HIGH {
+        set
+    } else {
+        !set
+    }
+}
+
+/// True while the front-panel power button is pressed (+0x08 bit6, CONFIRMED).
+pub fn power_button_pressed() -> bool {
+    read_bit(R_INPUT_POWER, POWER_BTN_BIT)
+}

@@ -1,0 +1,33 @@
+# iLO 3 CHIF host tool — runs on the XCP-ng 8.3 (x86_64) host, talks to the
+# clean-room Rust firmware over PCI (no JTAG/UART). Compiled replacement for
+# tools/ilo3-chif-console.py: dom0 has no guaranteed python3, a static musl
+# binary runs anywhere. Mirrors firmware/src/chif.rs + src/dbgchif.rs.
+#
+# This crate lives OUTSIDE rebuild/ilo3-rs/ on purpose: that tree's
+# .cargo/config.toml forces the armv5te-ilo3 bare-metal target + build-std,
+# which would break this host (std, x86_64) build.
+#
+# Build for the XCP-ng host (static, glibc-independent):
+#   cargo build --release --target x86_64-unknown-linux-musl
+# Local smoke build (host glibc):
+#   cargo build --release
+[package]
+name = "ilo3-chif"
+version = "0.1.0"
+edition = "2021"
+description = "iLO 3 (Gromit-XE) CHIF host tool — debug console + host-side SPI reflash over PCI"
+license = "GPL-3.0"
+
+[[bin]]
+name = "ilo3-chif"
+path = "src/main.rs"
+
+[dependencies]
+# Pure-Rust FFI decls only (mmap/open/pread); links musl's libc when static.
+libc = "0.2"
+
+[profile.release]
+opt-level = "z"
+lto = true
+strip = true
+panic = "abort"

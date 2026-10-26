@@ -21,6 +21,8 @@ mod flash;
 #[cfg(feature = "led-trace")]
 mod led;
 mod recovery;
+#[cfg(feature = "led-trace")]
+mod shmemtest; // 0x40000000 RAM-backing self-test (LED PASS/FAIL)
 mod uart;
 
 /// Post-DDR stack top (high DRAM), raised before the image copy so it cannot
@@ -96,13 +98,32 @@ pub extern "C" fn spl_main() -> ! {
     #[cfg(feature = "led-trace")]
     led::code(3); // 3x = DRAM up
 
+    // Shared-mem self-test: is 0x40000000 (the CHIF host-window base) backed by
+    // writable RAM here? (docs/28 §10 residual risk.) BMC-side, no host channel:
+    //   5x short  = PASS (window RAM is live — host interface can work)
+    //   3x LONG   = FAIL (0x40000000 not backed — CHIF/recovery cannot work; the
+    //               memctl needs a 0x40000000 aperture/alias, or a different base)
+    // Non-fatal: we continue to the recovery window either way. (If the probe
+    // itself hangs, boot stalls at the 3x "DRAM up" code = also diagnostic.)
+    #[cfg(feature = "led-trace")]
+    {
+        uart::puts("[spl] shmem self-test @0x40000000: ");
+        if shmemtest::probe() {
+            uart::puts("PASS (backed RAM)\n");
+            led::code(4); // 4x = shmem self-test PASS
+        } else {
+            uart::puts("FAIL (not backed — host interface dead)\n");
+            led::long(3); // 3x LONG = shmem self-test FAIL
+        }
+    }
+
     // DRAM is up: raise the stack into high DRAM, then hand off to recovery::boot
     // (offers the host RAM-boot window, else falls through to the flash image copy
     // + jump; never returns). Done in asm so SP is switched atomically before any
     // further stack use — the new frame comes from HIGH_SP, clear of the image /
     // RAM-boot target at DRAM base.
     #[cfg(feature = "led-trace")]
-    led::code(4); // 4x = handing off (recovery window / main)
+    led::code(5); // 5x = handing off (recovery window / main)
     // SAFETY: DDR is initialised, so HIGH_SP is valid RAM; boot() diverges.
     unsafe {
         core::arch::asm!(

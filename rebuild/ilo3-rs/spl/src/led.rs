@@ -12,7 +12,10 @@
 //!   1x  SPL entry (CPU alive, running from flash)
 //!   2x  clock check passed
 //!   3x  DDR up
-//!   4x  handing off (recovery window / main)
+//!   4x  shared-mem self-test PASS (0x40000000 is backed RAM)
+//!   5x  handing off (recovery window / main)
+//!   3x LONG         = shared-mem self-test FAIL (0x40000000 not backed → host
+//!                     interface dead); boot still continues
 //!   rapid, forever  = DDR calibration FAILED (src/ddr.rs timeout)
 
 #![allow(dead_code)]
@@ -54,6 +57,21 @@ pub fn code(n: u32) {
         i += 1;
     }
     delay(3); // inter-code gap
+}
+
+/// Blink the UID LED `n` times with LONG on/off periods — a rhythm clearly
+/// distinct from the short milestone counts in `code()`. Used for a non-fatal
+/// failure signal (e.g. the shared-mem self-test FAIL) where boot still continues.
+pub fn long(n: u32) {
+    let mut i = 0;
+    while i < n {
+        set_uid(true);
+        delay(4);
+        set_uid(false);
+        delay(4);
+        i += 1;
+    }
+    delay(6); // inter-code gap
 }
 
 /// Distinct never-ending rapid blink: an unmistakable error beacon (vs a silent
