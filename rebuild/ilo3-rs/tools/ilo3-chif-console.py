@@ -16,6 +16,10 @@ Two modes:
             verify + optional `reboot`. The SPL/boot region (>=0x7f0000) is write-
             protected in firmware, so a bad reflash of the payload is itself re-
             flashable from the host; only a nuked SPL needs the SPI programmer.
+  recover   RAM-boot a raw main image (--image ilo3-fw.bin) via the SPL recovery
+            window (spl/src/recovery.rs) — recovers a main too broken to reach its
+            own CHIF debug task, with NO doorbell dependency. Volatile; persist the
+            fix afterwards with `console` + `flash`. Reset iLO while this waits.
 
 Run as root. Point --bar at the iLO CHIF function's BAR2 resource, e.g.:
   /sys/bus/pci/devices/0000:02:00.2/resource2   (1 MB window, docs/06)
@@ -48,6 +52,15 @@ CMD = {"ping": 1, "drain": 2, "md": 3, "mw": 4, "mb": 5,
 
 SPL_BASE = 0x7f0000        # write-protected in firmware (recovery boot)
 CHUNK = 4096               # bytes per fwrite / fread (well under the 16 KB region)
+
+# --- SPL recovery mailbox (spl/src/recovery.rs), at window + 0x8000 ---
+REC = 0x8000
+REC_MAGIC, REC_REQ, REC_CMD, REC_ADDR = REC+0x00, REC+0x04, REC+0x08, REC+0x0C
+REC_LEN, REC_RESP, REC_STATUS, REC_DATA = REC+0x10, REC+0x14, REC+0x18, REC+0x40
+RCVR = 0x52564352          # "RCVR" little-endian
+RC_WRITE, RC_BOOT, RC_PING = 1, 2, 3
+RC_CHUNK = 0x3000          # mailbox data area (recovery.rs MAX_CHUNK)
+RAM_LOAD = 0x20000000      # DRAM base: where main's _start runs (= flash load addr)
 
 
 def open_bar(path):
@@ -216,13 +229,75 @@ def hexbytes(data, base):
         print(f"{base + off:08x}: " + " ".join(f"{b:02x}" for b in row))
 
 
+def rec_req(mm, cmd, addr=0, data=b"", wait=True, timeout=3.0):
+    # one recovery-mailbox request; (req_seq != resp_seq) carries it to the SPL
+    rec_req.seq = getattr(rec_req, "seq", 0) + 1
+    seq = rec_req.seq
+    if data:
+        mm[REC_DATA: REC_DATA + len(data)] = data
+    put_u32(mm, REC_CMD, cmd)
+    put_u32(mm, REC_ADDR, addr)
+    put_u32(mm, REC_LEN, len(data))
+    put_u32(mm, REC_REQ, seq)
+    if not wait:
+        return 0
+    t0 = time.time()
+    while time.time() - t0 < timeout:
+        if struct.unpack_from("<I", mm, REC_RESP)[0] == seq:
+            return struct.unpack_from("<I", mm, REC_STATUS)[0]
+        time.sleep(0.002)
+    return None
+
+
+def recover(mm, image_path, connect_timeout=90.0):
+    # Stream the RAW main firmware (ilo3-fw.bin, _start at 0x20000000 -- NOT
+    # flash.bin) into DRAM and RAM-boot it. Recovers a main too broken to reach
+    # its own CHIF debug task, without the SPI programmer. See spl/src/recovery.rs.
+    data = open(image_path, "rb").read()
+    print(f"recover: {len(data)} B -> DRAM {RAM_LOAD:#x} (volatile RAM-boot)")
+    put_u32(mm, REC_RESP, 0)
+    put_u32(mm, REC_REQ, 0)
+    rec_req.seq = 0
+    put_u32(mm, REC_MAGIC, RCVR)
+    print("waiting for the SPL recovery window — reset/power-cycle iLO now...")
+    t0 = time.time()
+    while time.time() - t0 < connect_timeout:
+        put_u32(mm, REC_MAGIC, RCVR)   # keep raised across iLO window re-mapping
+        if rec_req(mm, RC_PING, timeout=0.5) == 0:
+            break
+    else:
+        print("no SPL window (PCI enumeration / window timing — see docs/48)")
+        return False
+    print("connected to SPL recovery")
+    for off in range(0, len(data), RC_CHUNK):
+        chunk = data[off:off + RC_CHUNK]
+        st = rec_req(mm, RC_WRITE, RAM_LOAD + off, chunk)
+        if st != 0:
+            print(f"\n  write FAILED @ {RAM_LOAD+off:#x} status={st}")
+            return False
+        print(f"\r  streamed {off+len(chunk)}/{len(data)}", end="", flush=True)
+    print()
+    rec_req(mm, RC_BOOT, RAM_LOAD, wait=False)
+    print(f"boot sent -> iLO RAM-booting {RAM_LOAD:#x} "
+          "(volatile; persist with main `flash` once it's healthy)")
+    return True
+
+
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("mode", choices=["observe", "console"])
+    ap.add_argument("mode", choices=["observe", "console", "recover"])
     ap.add_argument("--bar", required=True, help="path to the CHIF BAR2 resource")
+    ap.add_argument("--image", help="raw main firmware .bin for `recover`")
     a = ap.parse_args()
     mm = open_bar(a.bar)
-    (observe if a.mode == "observe" else console)(mm)
+    if a.mode == "observe":
+        observe(mm)
+    elif a.mode == "recover":
+        if not a.image:
+            ap.error("recover needs --image <ilo3-fw.bin>")
+        recover(mm, a.image)
+    else:
+        console(mm)
 
 
 if __name__ == "__main__":

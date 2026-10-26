@@ -18,6 +18,7 @@ use core::panic::PanicInfo;
 
 mod ddr;
 mod flash;
+mod recovery;
 mod uart;
 
 /// Post-DDR stack top (high DRAM), raised before the image copy so it cannot
@@ -84,16 +85,18 @@ pub extern "C" fn spl_main() -> ! {
         }
     }
 
-    // DRAM is up: raise the stack into high DRAM, then hand off to the image
-    // copy + jump (never returns). Done in asm so SP is switched atomically
-    // before any further stack use — the new frame comes from HIGH_SP.
-    // SAFETY: DDR is initialised, so HIGH_SP is valid RAM; copy_and_jump diverges.
+    // DRAM is up: raise the stack into high DRAM, then hand off to recovery::boot
+    // (offers the host RAM-boot window, else falls through to the flash image copy
+    // + jump; never returns). Done in asm so SP is switched atomically before any
+    // further stack use — the new frame comes from HIGH_SP, clear of the image /
+    // RAM-boot target at DRAM base.
+    // SAFETY: DDR is initialised, so HIGH_SP is valid RAM; boot() diverges.
     unsafe {
         core::arch::asm!(
             "mov sp, {s}",
             "b   {f}",
             s = in(reg) HIGH_SP,
-            f = sym crate::flash::copy_and_jump,
+            f = sym crate::recovery::boot,
             options(noreturn),
         );
     }

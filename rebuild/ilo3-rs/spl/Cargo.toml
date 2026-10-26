@@ -10,6 +10,13 @@ path = "src/main.rs"
 test = false
 bench = false
 
+[features]
+# Host-pull RAM-boot recovery window (src/recovery.rs). Default-on for bring-up;
+# build --no-default-features for a production SPL that boots straight to flash
+# (no few-second recovery poll on every boot).
+default = ["recovery"]
+recovery = []
+
 # No dependencies: the SPL is pure no_std + register pokes. It runs XIP from
 # flash at 0xFFFF0000 before DRAM exists, so it must have no .data/.bss touched
 # pre-DDR and no heap/atomics — just .text/.rodata in flash + a scratch stack.

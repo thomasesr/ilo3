@@ -279,12 +279,40 @@ to `[0, 0x7f0000)`. So:
 - A bad reflash of the **payload** → reboot → SPL (always good) still runs → re-flash from host again.
 - The **SPL** can only be written by the SPI programmer. Keep it stable.
 
-**Remaining gap (follow-on): the early-main brick.** If a flashed payload crashes *before* the CHIF
-debug task spawns, the channel never comes up and the host can't re-flash → back to the programmer.
-To close this, add a **recovery window in the SPL**: after DDR init, before jumping to main, poll
-CHIF for a few seconds for a recovery/flash request (minimal bare-metal CHIF + `spinor` write). Then
-even a dead main is recoverable from the host. Until then: keep the verified backup + the programmer
-as last resort, and prefer reflashing only after a change has reached the debug task at least once.
+**The early-main brick — closed by the SPL recovery window (below).** If a flashed payload crashes
+*before* the CHIF debug task spawns, the main channel never comes up and the host can't re-flash via
+`console`. The SPL recovery window recovers it anyway, with no programmer.
 
 Clean reset alternative to `reboot`: pull AC / cycle iLO standby power (full reset); the soft-reboot
 just saves the manual step (a true SoC/WDT reset is CONFIRM-ON-HW).
+
+## SPL recovery window — host-pull RAM-boot (no programmer, no doorbell)
+
+`spl/src/recovery.rs` (cargo feature `recovery`, default-on). After DDR init, before jumping to main,
+the SPL offers a few-second window: if a host recovery tool is present, it streams a **raw main image
+straight into DRAM** (`0x20000000`) and the SPL jumps to it — a **volatile RAM-boot**. Nothing here
+writes flash, so **recovery itself can never brick**. Persist the fix afterwards with the main `flash`
+path once the RAM-booted main is healthy. This composes: SPL recovery gets *any* working main running;
+that main's `FWRITE` persists it.
+
+- **Transport**: a dead-simple polling mailbox in the shared-mem window (`window+0x8000`), NOT the CHIF
+  CCB ring — so it does **not depend on the host→iLO doorbell** (one fewer CONFIRM-ON-HW unknown). A
+  `(req_seq != resp_seq)` handshake carries one request at a time (PING / WRITE-chunk / BOOT).
+- **Safe by construction**: the poll loop has a bounded spin budget, so a normal host-less boot always
+  terminates and falls through to flash boot (never hangs — just a few seconds). WRITE/BOOT targets are
+  DRAM-bounds-checked. The SPL region stays programmer-only.
+- **Cost**: ~a few seconds added to every boot while the window polls. Build the SPL
+  `--no-default-features` for a production SPL that boots straight to flash.
+
+Procedure (recover a dead main):
+```
+# host, iLO on the bus:
+sudo ./tools/ilo3-chif-console.py recover --bar …/resource2 --image ilo3-fw.bin
+#   (ilo3-fw.bin = the RAW main .bin, _start at 0x20000000 — NOT flash.bin)
+# then reset / AC-cycle iLO; the tool connects when the SPL window opens, streams,
+# and RAM-boots the image. Once it's healthy, persist with `console` -> flash.
+```
+
+CONFIRM-ON-HW: the exact PCI-enumeration / window-mapping timing across an iLO reset (when the host
+mmap is valid and the SPL aperture is live) is bench-tuned; the tool spams the magic continuously to
+ride it out. The host-interface enable (BAR/CTRL writes) mirrors `chif.rs` init.
