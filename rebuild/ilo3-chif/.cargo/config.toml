@@ -1,0 +1,5 @@
+# Static link for the musl target so the binary runs on the XCP-ng 8.3 dom0
+# (CentOS 7.5 base, glibc 2.17) regardless of its libc version. The gnu target
+# is left dynamic for local smoke builds in this container.
+[target.x86_64-unknown-linux-musl]
+rustflags = ["-C", "target-feature=+crt-static"]
