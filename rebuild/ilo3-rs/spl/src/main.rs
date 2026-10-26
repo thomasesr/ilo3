@@ -18,6 +18,8 @@ use core::panic::PanicInfo;
 
 mod ddr;
 mod flash;
+#[cfg(feature = "led-trace")]
+mod led;
 mod recovery;
 mod uart;
 
@@ -61,6 +63,8 @@ global_asm!(
 
 #[no_mangle]
 pub extern "C" fn spl_main() -> ! {
+    #[cfg(feature = "led-trace")]
+    led::code(1); // 1x = SPL entry (CPU alive, running from flash)
     uart::puts("\n[spl] iLO3 Gromit-XE first-stage loader\n");
 
     // Clock self-check: the operative boot path (ROM fn 0x7f198c, docs/30) trains
@@ -75,21 +79,30 @@ pub extern "C" fn spl_main() -> ! {
     } else {
         uart::puts(" (strap-default clock, no PLL reprogram)\n");
     }
+    #[cfg(feature = "led-trace")]
+    led::code(2); // 2x = clock check passed
 
     match ddr::init() {
         ddr::Status::Warm => uart::puts("[spl] ddr: warm boot — DRAM already up\n"),
         ddr::Status::Cold => uart::puts("[spl] ddr: cold init complete\n"),
         ddr::Status::CalTimeout => {
             uart::puts("[spl] ddr: PHY calibration TIMEOUT — DRAM unusable, halt\n");
+            #[cfg(feature = "led-trace")]
+            led::panic_beacon(); // rapid blink forever = DDR failed (vs silent hang)
+            #[cfg(not(feature = "led-trace"))]
             flash::hang();
         }
     }
+    #[cfg(feature = "led-trace")]
+    led::code(3); // 3x = DRAM up
 
     // DRAM is up: raise the stack into high DRAM, then hand off to recovery::boot
     // (offers the host RAM-boot window, else falls through to the flash image copy
     // + jump; never returns). Done in asm so SP is switched atomically before any
     // further stack use — the new frame comes from HIGH_SP, clear of the image /
     // RAM-boot target at DRAM base.
+    #[cfg(feature = "led-trace")]
+    led::code(4); // 4x = handing off (recovery window / main)
     // SAFETY: DDR is initialised, so HIGH_SP is valid RAM; boot() diverges.
     unsafe {
         core::arch::asm!(
@@ -105,5 +118,8 @@ pub extern "C" fn spl_main() -> ! {
 #[panic_handler]
 fn panic(_info: &PanicInfo) -> ! {
     uart::puts("\n[spl] PANIC\n");
+    #[cfg(feature = "led-trace")]
+    led::panic_beacon();
+    #[cfg(not(feature = "led-trace"))]
     flash::hang();
 }

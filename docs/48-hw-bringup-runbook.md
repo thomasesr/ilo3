@@ -316,3 +316,34 @@ sudo ./tools/ilo3-chif-console.py recover --bar …/resource2 --image ilo3-fw.bi
 CONFIRM-ON-HW: the exact PCI-enumeration / window-mapping timing across an iLO reset (when the host
 mmap is valid and the SPL aperture is live) is bench-tuned; the tool spams the magic continuously to
 ride it out. The host-interface enable (BAR/CTRL writes) mirrors `chif.rs` init.
+
+## First-flash go/no-go
+
+**Artifacts ready**: `flash.bin` builds (8 MB, GXSP header @0, SPL vectors @0x7f0000); the verified HP
+backup (live chip dump = RE image, byte-identical) is the restore image.
+
+**HARD GATE — verify the programmer WRITE path first.** Recovery from a bad early-boot depends on
+reprogramming the backup. Before flashing *our* firmware: write the HP backup onto the chip, read it
+back, confirm byte-identical to the original dump. If that does not round-trip, do NOT flash — a brick
+would be permanent (worse with a resolder-each-iteration mount; a SOIC-8 clip/socket is strongly
+advised to make reprogram cheap).
+
+### UID-LED boot trace (pre-DDR observability)
+
+With no UART tap and a resolder mount, a pre-DDR SPL hang would otherwise be blind. `spl/src/led.rs`
+(feature `led-trace`, default-on) blinks the system **UID LED** (CPLD `0x01F14000` bit6, docs/08 —
+MMIO, alive at reset, no DRAM/PLL needed) at each milestone. Watch the LED; the last stable count is
+how far boot got:
+
+| blink | milestone |
+|------|-----------|
+| 1×   | SPL entry (CPU alive, running from flash) |
+| 2×   | clock check passed |
+| 3×   | DRAM up |
+| 4×   | handing off (recovery window / main) |
+| **rapid, forever** | DDR calibration FAILED (distinct beacon, not a silent hang) |
+
+So on first boot, before any CHIF/host tooling: 1→2→3→4 blinks = clock+DDR+handoff all worked (then
+main/recovery takes over the LED). Stops after 2× = DDR init hung. Rapid blink = DDR cal timeout. 1×
+then nothing = clock/DDR-entry fault. This localises a first-boot failure with no instrumentation but
+your eyes. Build `--no-default-features` to drop it (and `recovery`) for production.
